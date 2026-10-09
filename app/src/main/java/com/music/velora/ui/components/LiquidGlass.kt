@@ -72,9 +72,9 @@ val LocalFrostChrome = staticCompositionLocalOf<FrostChromeColors?> { null }
 
 /** Frost chrome colours derived from an [ArtworkPalette]. */
 fun ArtworkPalette.toFrostChrome(): FrostChromeColors = FrostChromeColors(
-    // Same elevated fill the page's own glass chips use, so the bars belong
-    // to the wash rather than sitting as a grey cutout on top of it.
-    tint = elevated,
+    // The page wash, lifted a hair for glass — same hue as the fade behind
+    // the artwork, not a separate grey or sleeve swatch.
+    tint = wash.pageFrostTint(),
     edge = onBackground.copy(alpha = 0.18f),
     content = onBackground,
     contentVariant = onBackgroundVariant,
@@ -135,14 +135,13 @@ fun rememberBottomDisplayCornerRadius(fallback: Dp = 28.dp): Dp {
 }
 
 /**
- * The nav pills on a coloured page. [page] is the frost already taken from
- * that page, a step lighter than the wash. Darken it, holding the hue, so
- * the bar reads as a darker tint of the page behind it.
+ * Frost pills on a page washed in [this] — same colour the page fades to,
+ * lifted just enough to read as glass on top of it.
  */
-fun Color.navbarTint(): Color {
+fun Color.pageFrostTint(): Color {
     val hsl = FloatArray(3)
     ColorUtils.colorToHSL(toArgb(), hsl)
-    hsl[2] = (hsl[2] - 0.10f).coerceIn(0.05f, 0.55f)
+    hsl[2] = (hsl[2] + 0.06f).coerceIn(0f, 1f)
     return Color(ColorUtils.HSLToColor(hsl))
 }
 

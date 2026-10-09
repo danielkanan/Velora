@@ -502,7 +502,7 @@ private fun artworkPageSurface(
     return Modifier.frostedSurface(
         shape = shape,
         hazeState = hazeState,
-        tint = if (LocalFrostChrome.current != null) chrome.tint.navbarTint() else null,
+        tint = if (LocalFrostChrome.current != null) chrome.tint else null,
     )
 }
 

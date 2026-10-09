@@ -125,9 +125,8 @@ fun GlassNavBar(
         Modifier.frostedSurface(
             shape = pillShape,
             hazeState = hazeState,
-            // On a coloured page the pills take that colour, a step darker
-            // than the wash. Elsewhere they stay the dark frost.
-            tint = if (LocalFrostChrome.current != null) chrome.tint.navbarTint() else null,
+            // On a coloured page the pills take the page wash, lifted a hair.
+            tint = if (LocalFrostChrome.current != null) chrome.tint else null,
         )
     }
 

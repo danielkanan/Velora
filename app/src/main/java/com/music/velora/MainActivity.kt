@@ -2062,7 +2062,9 @@ private fun VeloraApp(
         }
     }
     val detailChromePalette = remember(detailPalette, resolvedDetailPageColor) {
-        detailPalette.onSolid(resolvedDetailPageColor)
+        // Hero foot / Apple background when ready; until then the sleeve wash
+        // so album and playlist chrome matches the fade from the first frame.
+        detailPalette.onSolid(resolvedDetailPageColor ?: detailPalette.wash)
     }
     val reduceAnimation by AppSettings.reduceAnimation.collectAsStateWithLifecycle()
     // Restarted per page, so a new page's bars start from its own colour
