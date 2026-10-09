@@ -408,9 +408,8 @@ private fun VeloraApp(
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val hazeState = remember { HazeState() }
-    /** Still hero only — frosted chrome on detail pages with header video. */
+    /** Still hero registered here for header-video blur; chrome samples [hazeState]. */
     val detailChromeHaze = remember { HazeState() }
-    var detailHeaderVideoActive by remember { mutableStateOf(false) }
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     /**
      * Whether the player's sheet is up. The player is always a full-screen
@@ -2033,9 +2032,6 @@ private fun VeloraApp(
     val animatedCanvas by AppSettings.animatedCanvas.collectAsStateWithLifecycle()
     val detailExpectsHeaderVideo = detail?.type == BrowseType.ARTIST &&
         !detailApple?.videoUrl.isNullOrBlank() && animatedCanvas
-    LaunchedEffect(detail?.browseId) {
-        detailHeaderVideoActive = false
-    }
     LaunchedEffect(detail?.browseId, detailApple) {
         val id = detail?.browseId ?: return@LaunchedEffect
         when {
@@ -2049,7 +2045,6 @@ private fun VeloraApp(
             }
         }
     }
-    val chromeHaze = if (detailHeaderVideoActive) detailChromeHaze else hazeState
     val resolvedDetailPageColor by remember {
         derivedStateOf {
             detailPageColor
@@ -2795,9 +2790,6 @@ private fun VeloraApp(
                                 }
                             },
                             chromeHazeState = detailChromeHaze,
-                            onHeaderVideoActive = { active ->
-                                if (page.browseId == detail?.browseId) detailHeaderVideoActive = active
-                            },
                             onSongClick = { songs, index ->
                                 playFrom(
                                     songs,
@@ -3182,7 +3174,7 @@ private fun VeloraApp(
                     },
                     transparentBackdrop = true,
                     artworkPageChrome = isReplayVisible || isDetailVisible,
-                    backButtonHazeState = chromeHaze,
+                    backButtonHazeState = hazeState,
                     trailingTitle = if (detail != null && detailActiveShelf != null) detail.title else null,
                     // Pushed pages wait until their large in-page heading has
                     // scrolled away. Root tabs keep the title on the page.
@@ -3529,7 +3521,7 @@ private fun VeloraApp(
                         tabs = tabs,
                         selectedIndex = selectedTab,
                         onTabSelected = onTabSelected,
-                        hazeState = chromeHaze,
+                        hazeState = hazeState,
                         song = player.song,
                         isPlaying = player.isPlaying,
                         isLoading = playPauseBusy,

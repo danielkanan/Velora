@@ -33,8 +33,6 @@ import androidx.core.graphics.ColorUtils
 import com.music.velora.data.settings.AppSettings
 import com.music.velora.ui.theme.ArtworkPalette
 import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.HazeStyle
-import dev.chrisbanes.haze.HazeTint
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import dev.chrisbanes.haze.materials.HazeMaterials
 
@@ -72,7 +70,7 @@ val LocalFrostChrome = staticCompositionLocalOf<FrostChromeColors?> { null }
 
 /** Frost chrome colours derived from an [ArtworkPalette]. */
 fun ArtworkPalette.toFrostChrome(): FrostChromeColors = FrostChromeColors(
-    // The page wash, lifted a hair for glass — same hue as the fade behind
+    // The page wash, nudged darker for glass — same hue as the fade behind
     // the artwork, not a separate grey or sleeve swatch.
     tint = wash.pageFrostTint(),
     edge = onBackground.copy(alpha = 0.18f),
@@ -136,12 +134,12 @@ fun rememberBottomDisplayCornerRadius(fallback: Dp = 28.dp): Dp {
 
 /**
  * Frost pills on a page washed in [this] — same colour the page fades to,
- * lifted just enough to read as glass on top of it.
+ * darkened a hair so the blur reads as tinted glass, not a flat fill.
  */
 fun Color.pageFrostTint(): Color {
     val hsl = FloatArray(3)
     ColorUtils.colorToHSL(toArgb(), hsl)
-    hsl[2] = (hsl[2] + 0.06f).coerceIn(0f, 1f)
+    hsl[2] = (hsl[2] - 0.035f).coerceIn(0f, 1f)
     return Color(ColorUtils.HSLToColor(hsl))
 }
 
@@ -162,17 +160,8 @@ fun Modifier.frostedSurface(
     val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
     val chrome = frostChromeColors()
     val fill = tint ?: chrome.tint
-    val haze = if (tint != null) {
-        HazeStyle(
-            backgroundColor = fill,
-            tints = listOf(HazeTint(fill.copy(alpha = 0.94f))),
-            blurRadius = 24.dp,
-            noiseFactor = 0.08f,
-            fallbackTint = HazeTint(fill),
-        )
-    } else {
-        HazeMaterials.regular(fill)
-    }
+    // Same regular material as home — page colour only replaces [FROST_TINT].
+    val haze = HazeMaterials.regular(fill)
     return clip(shape)
         .then(
             when {

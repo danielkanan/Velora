@@ -78,7 +78,8 @@ class HeroFootBlurTest {
         val red = (solid ushr 16) and 0xFF
         val green = (solid ushr 8) and 0xFF
         val blue = solid and 0xFF
-        assertTrue("deepened to $red,$green,$blue", red < 110 && green < 120 && blue < 100)
+        // Still clearly deepened from the pale band, but closer to the sleeve.
+        assertTrue("deepened to $red,$green,$blue", red < 118 && green < 128 && blue < 108)
         assertTrue(red > 40 && green > 40)
         assertTrue(green + 4 >= red && green + 4 >= blue)
     }

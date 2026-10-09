@@ -125,7 +125,7 @@ fun GlassNavBar(
         Modifier.frostedSurface(
             shape = pillShape,
             hazeState = hazeState,
-            // On a coloured page the pills take the page wash, lifted a hair.
+            // On a coloured page the pills use the same blur as home, page-tinted.
             tint = if (LocalFrostChrome.current != null) chrome.tint else null,
         )
     }

@@ -336,8 +336,6 @@ fun DetailScreen(
      * hero only, so the clip does not invalidate blur every frame.
      */
     chromeHazeState: HazeState? = null,
-    /** True while [PageBackground] is showing a looping header clip. */
-    onHeaderVideoActive: (Boolean) -> Unit = {},
     /**
      * Holding one of the album cards on an artist page — the same menu the
      * shelves on every other tab open, so a release can be queued from
@@ -558,7 +556,6 @@ fun DetailScreen(
                 videoBlur = foot?.videoBlur(heroWidthPx, photoHeightPx),
                 chromeHazeState = chromeHazeState,
                 expectsHeaderVideo = expectsHeaderVideo,
-                onHeaderVideoActive = onHeaderVideoActive,
                 modifier = Modifier
                     .matchParentSize()
                     .zIndex(0f),
@@ -1234,7 +1231,6 @@ private fun PageBackground(
     videoBlur: FootBlurSpec?,
     chromeHazeState: HazeState?,
     expectsHeaderVideo: Boolean,
-    onHeaderVideoActive: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val reduceAnimation by AppSettings.reduceAnimation.collectAsStateWithLifecycle()
@@ -1261,16 +1257,6 @@ private fun PageBackground(
     var clipCover by remember(clip?.url) { mutableFloatStateOf(0f) }
     val clipHandoff = clip != null && clipCover >= HEADER_CLIP_HANDOFF_COVER
     val hazeStill = foot != null && chromeHazeState != null && (expectsHeaderVideo || clip != null)
-    val headerVideoActive = clip != null && chromeHazeState != null
-    SideEffect {
-        onHeaderVideoActive(
-            (expectsHeaderVideo && foot != null) ||
-                (headerVideoActive && clipHandoff),
-        )
-    }
-    DisposableEffect(Unit) {
-        onDispose { onHeaderVideoActive(false) }
-    }
     val density = LocalDensity.current
     val heroBoxHeightPx = foot?.let {
         with(density) { (artHeight * (1f + it.runFraction)).roundToPx() }

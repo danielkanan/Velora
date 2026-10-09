@@ -417,7 +417,7 @@ private fun Seed.toPalette(dark: Boolean): ArtworkPalette = if (dark) {
         // recognisably *this* record's colour.
         background = dominant.withHsl(
             saturation = { adaptedArtworkSaturation(it, minimum = 0.20f, maximum = 0.62f) },
-            lightness = { 0.13f },
+            lightness = { 0.15f },
         ),
         // Follows the edge's own brightness within a band that stays clear of
         // white body text at the top and of [background] at the bottom: a
@@ -425,11 +425,11 @@ private fun Seed.toPalette(dark: Boolean): ArtworkPalette = if (dark) {
         // bright leaves a page that is visibly lit from under the artwork.
         wash = edge.withHsl(
             saturation = { adaptedArtworkSaturation(it, minimum = 0.18f, maximum = 0.58f) },
-            lightness = { it.coerceIn(0.14f, 0.24f) },
+            lightness = { it.coerceIn(0.16f, 0.27f) },
         ),
         elevated = dominant.withHsl(
             saturation = { adaptedArtworkSaturation(it, minimum = 0.20f, maximum = 0.62f) },
-            lightness = { 0.22f },
+            lightness = { 0.24f },
         ),
         accent = vibrant.withHsl(
             saturation = { adaptedArtworkSaturation(it, minimum = 0.55f, maximum = 1f) },

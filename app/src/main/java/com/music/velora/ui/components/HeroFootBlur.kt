@@ -252,16 +252,30 @@ internal fun pageColour(mean: Int): Int {
         }
         (sector / 6f).mod(1f)
     }
-    val muted = (target / light.coerceAtLeast(0.05f)).coerceIn(0.82f, 1f)
-    return fromHsl(hue, saturation * muted, target)
+    val muted = (target / light.coerceAtLeast(0.05f)).coerceIn(0.88f, 1f)
+    val deepened = fromHsl(hue, saturation * muted, target)
+    return blendTowardMean(mean, deepened, PAGE_MEAN_BLEND)
+}
+
+/** Pull the deepened page colour a little back toward the artwork's own mean. */
+private const val PAGE_MEAN_BLEND = 0.14f
+
+private fun blendTowardMean(mean: Int, result: Int, meanWeight: Float): Int {
+    val w = meanWeight.coerceIn(0f, 1f)
+    fun channel(shift: Int): Int {
+        val fromMean = (mean shr shift) and 0xFF
+        val fromResult = (result shr shift) and 0xFF
+        return (fromMean * w + fromResult * (1f - w) + 0.5f).toInt().coerceIn(0, 255)
+    }
+    return (0xFF shl 24) or (channel(16) shl 16) or (channel(8) shl 8) or channel(0)
 }
 
 /**
  * The band measured off Apple's own pages: deep enough that a bright hero is
  * not pasted on as-is, and no deeper than the teal they paint under a sky.
  */
-private const val PAGE_LIGHT_MIN = 0.20f
-private const val PAGE_LIGHT_MAX = 0.36f
+private const val PAGE_LIGHT_MIN = 0.21f
+private const val PAGE_LIGHT_MAX = 0.40f
 
 private fun fromHsl(hue: Float, saturation: Float, light: Float): Int {
     val q = if (light < 0.5f) light * (1f + saturation) else light + saturation - light * saturation
