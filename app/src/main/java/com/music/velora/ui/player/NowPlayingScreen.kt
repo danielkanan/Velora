@@ -606,6 +606,9 @@ fun NowPlayingScreen(
      * width comfortably clears a phone's landscape width.
      */
     windowHeight: Dp,
+    /** When true, the current item is played as a muxed music video (not audio-only). */
+    musicVideoPlayback: Boolean = false,
+    mediaController: androidx.media3.session.MediaController? = null,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -664,7 +667,9 @@ fun NowPlayingScreen(
     // track" check lives.
     val spotifyCanvasAutoHide by AppSettings.spotifyCanvasAutoHide.collectAsStateWithLifecycle()
     val mixing by AppSettings.smartMixInProgress.collectAsStateWithLifecycle()
-    val canvas = rememberCanvasArtwork(song)
+    val canvasArtwork = rememberCanvasArtwork(song)
+    val canvas = if (musicVideoPlayback) null else canvasArtwork
+    var musicVideoFullscreen by remember(song.videoId) { mutableStateOf(false) }
     var canvasAspect by remember(canvas) { mutableFloatStateOf(0f) }
     // Whether the clip actually has a frame on screen right now, and one of
     // them — used to blow the sleeve out to the full-bleed hero treatment and
@@ -1081,8 +1086,10 @@ fun NowPlayingScreen(
     // Spotify Canvas is the player background on a phone, independent of the
     // still-art full-bleed preference. Other providers and static artwork keep
     // answering to that preference exactly as before.
-    val heroMode = spotifyCanvasOnPhone ||
-        (fullBleedArt && playerFillsWindow(windowWidth))
+    val heroMode = !musicVideoPlayback && (
+        spotifyCanvasOnPhone ||
+            (fullBleedArt && playerFillsWindow(windowWidth))
+    )
 
     // Whether there's a still image to blow out — a placeholder tile is a card
     // or it is nothing, and going full-bleed with one would just tint the top
@@ -1418,6 +1425,30 @@ fun NowPlayingScreen(
                 request = request,
                 onDismiss = { lyricsShare = null },
             )
+        }
+        if (musicVideoFullscreen && musicVideoPlayback && mediaController != null) {
+            BackHandler { musicVideoFullscreen = false }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black),
+            ) {
+                MusicVideoSurface(
+                    player = mediaController,
+                    modifier = Modifier.fillMaxSize(),
+                    cornerRadius = 0f,
+                )
+                MusicVideoFullscreen(
+                    song = song,
+                    player = mediaController,
+                    position = position,
+                    durationMs = durationMs,
+                    isPlaying = isPlaying,
+                    onDismiss = { musicVideoFullscreen = false },
+                    onPlayPause = onPlayPause,
+                    onSeekFraction = onSeekFraction,
+                )
+            }
         }
     }
 
@@ -2317,12 +2348,25 @@ fun NowPlayingScreen(
                 // the pair sits centred while the queue is closed — in whatever
                 // the controls couldn't take, which on all but the tallest
                 // screens is nothing.
+                fun artSize(): Dp = lerp(fullArt, THUMB_SIZE, p())
+                // Music videos paint 16:9 inside the same square sleeve slot songs
+                // use, so the title row stays on the usual baseline under that slot.
+                fun artVisualHeight(): Dp =
+                    if (musicVideoPlayback) artSize() * 9f / 16f else artSize()
                 val groupTop = (maxHeight - fullArt - ART_TITLE_GAP - HEADER_HEIGHT)
                     .coerceAtLeast(0.dp) / 2
                 // Functions of the collapse, called at placement and measure
                 // — see [p]. Composition never reads them.
-                fun artSize(): Dp = lerp(fullArt, THUMB_SIZE, p())
-                fun artTop(): Dp = lerp(groupTop, 0.dp, p())
+                fun artTop(): Dp {
+                    val slot = artSize()
+                    val visual = artVisualHeight()
+                    val expandedTop = if (musicVideoPlayback) {
+                        groupTop + (slot - visual) / 2
+                    } else {
+                        groupTop
+                    }
+                    return lerp(expandedTop, 0.dp, p())
+                }
                 // Expanded and height-bound, the sleeve is narrower than the
                 // player and has to be centred in it; collapsed, it belongs
                 // hard against the left edge with the credits beside it.
@@ -2391,9 +2435,10 @@ fun NowPlayingScreen(
                         // What `.size(artSize)` measured, asked at measure
                         // time instead of composition.
                         .layout { measurable, constraints ->
-                            val side = artSize().roundToPx()
+                            val width = artSize().roundToPx()
+                            val height = if (musicVideoPlayback) width * 9 / 16 else width
                             val placeable = measurable.measure(
-                                constraints.constrain(Constraints.fixed(side, side)),
+                                constraints.constrain(Constraints.fixed(width, height)),
                             )
                             layout(placeable.width, placeable.height) { placeable.placeRelative(0, 0) }
                         }
@@ -2546,6 +2591,18 @@ fun NowPlayingScreen(
                                 )
                             }
                         }
+                        if (musicVideoPlayback && mediaController != null && !musicVideoFullscreen) {
+                            MusicVideoSurface(
+                                player = mediaController,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                            MusicVideoExpandButton(
+                                onClick = { musicVideoFullscreen = true },
+                                modifier = Modifier
+                                    .align(Alignment.TopStart)
+                                    .padding(8.dp),
+                            )
+                        }
                     }
 
                     // Measured stats stay on the sleeve's bottom centre. They
@@ -2586,7 +2643,7 @@ fun NowPlayingScreen(
                         modifier = Modifier
                             .align(Alignment.TopCenter)
                             .offset {
-                                IntOffset(0, (artTop() + artSize() + (ART_TITLE_GAP - 16.dp) / 2).roundToPx())
+                                IntOffset(0, (artTop() + fullArt + (ART_TITLE_GAP - 16.dp) / 2).roundToPx())
                             }
                             .size(16.dp)
                             .graphicsLayer {

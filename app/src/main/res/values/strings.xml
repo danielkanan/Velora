@@ -99,7 +99,7 @@
     <string name="albums">Albums</string>
     <string name="no_album_metadata">None of these tracks say what album they are from.</string>
     <string name="search_empty">Search millions of songs on YouTube Music.</string>
-    <string name="recent_searches">Recent searches</string>
+    <string name="recent_searches">Recently Searched</string>
     <string name="clear">Clear</string>
     <string name="search_hint">Artists, Songs, Lyrics and More</string>
     <string name="settings_search_hint">Search settings</string>
@@ -1166,6 +1166,8 @@
     <string name="shelf_chart">Chart</string>
 
     <string name="shelf_song_item">Song</string>
+
+    <string name="shelf_music_video_item">Music Video</string>
 
     <string name="shelf_from_the_community">From the community</string>
 

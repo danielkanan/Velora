@@ -1178,9 +1178,9 @@ internal fun Modifier.opensPage(browseId: String?, onOpen: (String) -> Unit): Mo
     }
 
 /**
- * Artist credit under the title. Opens the destinations sheet for a multi-
- * artist / album track (see [com.music.velora.ui.components.opensDestinationsSheet]),
- * or the single artist page when that sheet would only have one row.
+ * Artist credit under the title. Opens the destinations sheet when several
+ * artists are credited (see [com.music.velora.ui.components.opensDestinationsSheet]),
+ * or the single artist page otherwise.
  */
 internal fun Modifier.opensArtistCredit(
     song: Song,

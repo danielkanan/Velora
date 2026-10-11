@@ -37,6 +37,7 @@ import org.schabi.newpipe.extractor.exceptions.YoutubeMusicPremiumContentExcepti
 import org.schabi.newpipe.extractor.services.youtube.YoutubeJavaScriptPlayerManager
 import org.schabi.newpipe.extractor.stream.AudioStream
 import org.schabi.newpipe.extractor.stream.DeliveryMethod
+import org.schabi.newpipe.extractor.stream.VideoStream
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -255,10 +256,16 @@ object StreamResolver {
      * starting a track, and ExoPlayer asks again for every re-open: each seek
      * outside the buffer, and each range the cache fills in.
      */
-    suspend fun resolve(videoId: String): String {
+    suspend fun resolve(videoId: String): String = resolvePlayback(videoId, withVideo = false)
+
+    /** Progressive muxed audio+video for music-video playback in the player UI. */
+    suspend fun resolveVideo(videoId: String): String = resolvePlayback(videoId, withVideo = true)
+
+    private suspend fun resolvePlayback(videoId: String, withVideo: Boolean): String {
         init
 
-        recent[videoId]
+        val cacheKey = cacheKey(videoId, withVideo)
+        recent[cacheKey]
             ?.takeIf { SystemClock.elapsedRealtime() - it.at < URL_TTL_MS }
             ?.let { return it.url }
 
@@ -267,15 +274,18 @@ object StreamResolver {
         // See [rememberUnplayable] for why this is the fix for "stuck loading".
         unplayableReason(videoId)?.let { throw PermanentlyUnplayableException(it) }
 
-        val stream = coalescedResolve(videoId)
+        val stream = if (withVideo) coalescedResolveVideo(videoId) else coalescedResolve(videoId)
 
         // The container carries no bitrate field, so this is the only place the
         // real figure is ever known.
         NerdStats.onStreamPicked(videoId, stream.kbps)
         stream.loudnessDb?.let { loudness[videoId] = it }
-        remember(videoId, stream.url)
+        remember(cacheKey, stream.url)
         return stream.url
     }
+
+    private fun cacheKey(videoId: String, withVideo: Boolean): String =
+        if (withVideo) "$videoId#v" else videoId
 
     /** Per-track loudness, read once and kept for as long as the process runs. */
     private val loudness = ConcurrentHashMap<String, Double>()
@@ -415,6 +425,22 @@ object StreamResolver {
         return walk.await()
     }
 
+    private suspend fun coalescedResolveVideo(videoId: String): Stream {
+        val flightKey = cacheKey(videoId, true)
+        inFlight[flightKey]?.let { return it.await() }
+        val walk = resolverScope.async(TrackLog.about(videoId), start = CoroutineStart.LAZY) {
+            resolveUncachedVideo(videoId)
+        }
+        val running = inFlight.putIfAbsent(flightKey, walk)
+        if (running != null) {
+            walk.cancel()
+            return running.await()
+        }
+        walk.invokeOnCompletion { inFlight.remove(flightKey, walk) }
+        walk.start()
+        return walk.await()
+    }
+
     private val inFlight = ConcurrentHashMap<String, Deferred<Stream>>()
 
     private val resolverScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -473,6 +499,36 @@ object StreamResolver {
             throw e
         }
         TrackLog.d(TAG, "TIMING $videoId total resolve: ${SystemClock.elapsedRealtime() - resolveStart}ms")
+        return stream
+    }
+
+    private suspend fun resolveUncachedVideo(videoId: String): Stream {
+        val resolveStart = SystemClock.elapsedRealtime()
+        val stream = try {
+            timed("$videoId newPipeVideo") { newPipeMuxedVideoStream(videoId) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: LinkageError) {
+            TrackLog.w(
+                TAG,
+                "video resolve hit a linkage failure for $videoId: ${e.javaClass.name}: ${e.message}",
+                e,
+            )
+            throw IOException("Stream resolution cannot run on this device: $e", e)
+        } catch (e: Exception) {
+            TrackLog.w(
+                TAG,
+                "video resolve failed for $videoId after ${SystemClock.elapsedRealtime() - resolveStart}ms: " +
+                    "${e.javaClass.name}: ${e.message}",
+                e,
+            )
+            permanentReason(e)?.let { reason ->
+                rememberUnplayable(videoId, reason)
+                throw PermanentlyUnplayableException(reason)
+            }
+            throw e
+        }
+        TrackLog.d(TAG, "TIMING $videoId total video resolve: ${SystemClock.elapsedRealtime() - resolveStart}ms")
         return stream
     }
 
@@ -867,6 +923,41 @@ object StreamResolver {
      * pays that transform four or five times instead: measured on-device at
      * 49.8s against 2.3s for the same track over the same connection.
      */
+    private suspend fun newPipeMuxedVideoStream(videoId: String): Stream = extractionGate.withLock {
+        withContext(Dispatchers.IO) {
+            val waited = SystemClock.elapsedRealtime()
+            val extractor = ServiceList.YouTube.getStreamExtractor(
+                "https://www.youtube.com/watch?v=$videoId",
+            )
+            extractor.fetchPage()
+            val candidates = extractor.videoStreams
+                .filter {
+                    !it.content.isNullOrBlank() &&
+                        it.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP
+                }
+            val stream = pickMuxedVideo(candidates)
+                ?: error("Track unavailable: no video streams")
+            TrackLog.d(
+                TAG,
+                "NewPipe picked video ${stream.height}p " +
+                    "(extraction held the gate ${SystemClock.elapsedRealtime() - waited}ms)",
+            )
+            Stream(
+                url = stream.content,
+                kbps = 0,
+                mimeType = stream.format?.mimeType.orEmpty().ifBlank { "video/mp4" },
+            )
+        }
+    }
+
+    /** Prefer 720p or below; fall back to the smallest progressive muxed stream. */
+    private fun pickMuxedVideo(candidates: List<VideoStream>): VideoStream? {
+        if (candidates.isEmpty()) return null
+        val withinBudget = candidates.filter { it.height in 1..720 }
+        return withinBudget.maxByOrNull { it.height }
+            ?: candidates.minByOrNull { it.height }
+    }
+
     private suspend fun newPipeStream(
         videoId: String,
         select: (List<Pair<Int, AudioStream>>) -> AudioStream?,
@@ -1086,12 +1177,12 @@ object StreamResolver {
     /** Enough for the queue in hand; this is a latency cache, not a store. */
     private const val MAX_REMEMBERED = 32
 
-    private fun remember(videoId: String, url: String) {
+    private fun remember(cacheKey: String, url: String) {
         if (recent.size >= MAX_REMEMBERED) {
             val cutoff = SystemClock.elapsedRealtime() - URL_TTL_MS
             recent.entries.removeAll { it.value.at < cutoff }
             if (recent.size >= MAX_REMEMBERED) recent.clear()
         }
-        recent[videoId] = Resolved(url, SystemClock.elapsedRealtime())
+        recent[cacheKey] = Resolved(url, SystemClock.elapsedRealtime())
     }
 }

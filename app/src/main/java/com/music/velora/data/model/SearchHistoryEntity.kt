@@ -28,6 +28,7 @@ data class SearchHistoryEntity(
 
 enum class EntityType {
     @SerialName("TRACK") TRACK,
+    @SerialName("MUSIC_VIDEO") MUSIC_VIDEO,
     @SerialName("ALBUM") ALBUM,
     @SerialName("ARTIST") ARTIST,
     @SerialName("PLAYLIST") PLAYLIST,

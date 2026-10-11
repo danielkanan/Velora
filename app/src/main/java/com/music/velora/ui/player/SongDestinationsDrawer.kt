@@ -22,6 +22,7 @@ internal fun SongDestinationsDrawer(
     onOpenArtist: (browseId: String, name: String) -> Unit,
     onOpenAlbum: (browseId: String, title: String) -> Unit,
     modifier: Modifier = Modifier,
+    omitAlbumBrowseId: String? = null,
 ) {
     val palette = rememberArtworkPalette(song.thumbnailUrl, artPx = ROW_ART_PX)
     PlayerDrawer(
@@ -35,6 +36,7 @@ internal fun SongDestinationsDrawer(
             song = song,
             onOpenArtist = onOpenArtist,
             onOpenAlbum = onOpenAlbum,
+            omitAlbumBrowseId = omitAlbumBrowseId,
         )
     }
 }

@@ -1314,6 +1314,13 @@ class PlaybackService : MediaLibraryService() {
             }
             val videoId = dataSpec.uri.getQueryParameter("v")
                 ?: return@Resolver dataSpec
+            val wantsVideoPlayback = SourceResolver.targetIn(dataSpec.uri).isVideo
+            if (wantsVideoPlayback) {
+                // A warmed audio URL from read-ahead or an earlier play must not
+                // be reused — video rows need a muxed stream or the surface stays black.
+                StreamChoice.forget(videoId)
+                QualityUpgrade.forget(videoId)
+            }
             // An explicit rollback is not a preference for a different
             // candidate: it means this exact YouTube rendition, immediately.
             // Answer it before StreamChoice, the module race and a pending
@@ -1325,7 +1332,7 @@ class PlaybackService : MediaLibraryService() {
                 NerdStats.recordSource(videoId, "YouTube")
                 val streamUrl = try {
                     runBlocking(about) {
-                        withTimeout(RESOLVE_TIMEOUT_MS) { StreamResolver.resolve(videoId) }
+                        withTimeout(RESOLVE_TIMEOUT_MS) { resolveYouTubePlayback(videoId, dataSpec.uri) }
                     }
                 } catch (e: TimeoutCancellationException) {
                     throw java.io.IOException("Direct YouTube resolution timed out for $videoId", e)
@@ -1407,7 +1414,7 @@ class PlaybackService : MediaLibraryService() {
             // the end of the cached bytes. Deciding afresh each time is how
             // the middle of an MP4 ended up appended to a WebM. See
             // [StreamChoice].
-            StreamChoice.of(videoId)?.let { serving ->
+            if (!wantsVideoPlayback) StreamChoice.of(videoId)?.let { serving ->
                 // What the stream claims to be, restated on every open rather
                 // than only on the one that chose it.
                 //
@@ -1466,7 +1473,7 @@ class PlaybackService : MediaLibraryService() {
             if (!SourceResolver.canSubstituteForYouTube()) {
                 val streamUrl = try {
                     runBlocking(about) {
-                        withTimeout(RESOLVE_TIMEOUT_MS) { StreamResolver.resolve(videoId) }
+                        withTimeout(RESOLVE_TIMEOUT_MS) { resolveYouTubePlayback(videoId, dataSpec.uri) }
                     }
                 } catch (e: TimeoutCancellationException) {
                     throw java.io.IOException("Stream resolution timed out for $videoId", e)
@@ -4595,10 +4602,20 @@ class PlaybackService : MediaLibraryService() {
      * break in the audio, in exchange for the listener hearing something now
      * rather than waiting in silence for the good copy.
      */
+    private suspend fun resolveYouTubePlayback(videoId: String, uri: android.net.Uri): String {
+        val target = SourceResolver.targetIn(uri)
+        if (!target.isVideo) return StreamResolver.resolve(videoId)
+        StreamChoice.forget(videoId)
+        return StreamResolver.resolveVideo(videoId)
+    }
+
     private suspend fun resolveWithModulePriority(
         videoId: String,
         target: TrackMatcher.Target,
     ): Resolved {
+        if (target.isVideo) {
+            return Resolved.YouTube(StreamResolver.resolveVideo(videoId))
+        }
         // A substitute already broke this track once — see
         // [StreamChoice.refuseSubstitutes]. Racing the modules again would find
         // the same catalogue holding the same unplayable URL, so there is

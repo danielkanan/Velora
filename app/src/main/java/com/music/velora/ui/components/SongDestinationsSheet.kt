@@ -62,14 +62,11 @@ fun creditArtistNames(raw: String): List<String> =
         .filter { it.isNotBlank() }
 
 /**
- * Whether tapping the artist credit should open this sheet instead of jumping
- * straight to a single artist page — several credited artists, or an album
- * worth offering beside them.
+ * Whether tapping the artist credit should open the destinations sheet instead
+ * of jumping straight to a single artist page — only when several artists are
+ * credited. A lone artist opens directly even when the track has an album id.
  */
-fun Song.opensDestinationsSheet(): Boolean {
-    val artists = destinationArtists()
-    return artists.size > 1 || !albumId.isNullOrBlank()
-}
+fun Song.opensDestinationsSheet(): Boolean = destinationArtists().size > 1
 
 /** Artists to list on the sheet; prefers parsed [Song.artists] when present. */
 fun Song.destinationArtists(): List<ArtistCredit> {
@@ -100,12 +97,15 @@ fun SongDestinationsSheet(
     modifier: Modifier = Modifier,
     hazeState: HazeState? = null,
     pagePalette: ArtworkPalette? = null,
+    /** When set, the album row is omitted if it matches this browse id (already on that album). */
+    omitAlbumBrowseId: String? = null,
 ) {
     FrostedSheet(hazeState = hazeState, palette = pagePalette, modifier = modifier) {
         SongDestinationsContent(
             song = song,
             onOpenArtist = onOpenArtist,
             onOpenAlbum = onOpenAlbum,
+            omitAlbumBrowseId = omitAlbumBrowseId,
         )
     }
 }
@@ -119,9 +119,10 @@ fun SongDestinationsContent(
     song: Song,
     onOpenArtist: (browseId: String, name: String) -> Unit,
     onOpenAlbum: (browseId: String, title: String) -> Unit,
+    omitAlbumBrowseId: String? = null,
 ) {
     val artists = song.destinationArtists()
-    val albumId = song.albumId
+    val albumId = song.albumId?.takeUnless { it == omitAlbumBrowseId }
     val albumTitle = song.albumName?.takeIf { it.isNotBlank() } ?: song.title
 
     Spacer(Modifier.height(8.dp))

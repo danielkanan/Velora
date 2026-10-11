@@ -26,7 +26,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.NorthWest
 import androidx.compose.material.icons.rounded.Search
@@ -45,6 +44,8 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
@@ -77,6 +78,7 @@ import com.music.velora.ui.components.SearchField
 import com.music.velora.ui.components.frostedSurface
 import androidx.compose.runtime.SideEffect
 import com.music.velora.ui.components.SongRow
+import com.music.velora.ui.components.shelfTypeLabel
 import com.music.velora.ui.components.thumbnailBorder
 import com.music.velora.ui.components.songListSkeleton
 import com.music.velora.ui.haptics.Haptic
@@ -182,7 +184,6 @@ fun SearchScreen(
     onSubmit: () -> Unit,
     onSuggestionClick: (String) -> Unit,
     onHistoryClick: (SearchHistoryEntity) -> Unit,
-    onHistoryRemove: (String) -> Unit,
     onHistoryClear: () -> Unit,
     /** Long-press handler for typeahead rows — opens the song actions sheet. */
     onTypeaheadLongPress: ((Song) -> Unit)? = null,
@@ -293,7 +294,14 @@ fun SearchScreen(
             results == null -> if (history.isEmpty()) {
                 item { MessageState(stringResource(R.string.search_empty)) }
             } else {
-                recentSearches(history, onHistoryClick, onHistoryRemove, onHistoryClear)
+                recentSearches(
+                    history = history,
+                    onClick = onHistoryClick,
+                    onClear = onHistoryClear,
+                    onSongLongPress = onSongLongPress,
+                    onSongSwipe = onSongSwipe,
+                    onBrowseLongPress = onBrowseLongPress,
+                )
             }
             results is UiState.Loading -> songListSkeleton(
                 circular = filter == SearchFilter.ARTISTS,
@@ -348,7 +356,7 @@ fun SearchScreen(
                                     modifier = Modifier.padding(vertical = 6.dp),
                                     artworkSize = SearchResultArtSize,
                                     artworkCornerRadius = SearchSquareArtCorner,
-                                    widescreenArtwork = filter == SearchFilter.VIDEOS,
+                                    widescreenArtwork = filter == SearchFilter.VIDEOS || song.isVideo,
                                     onClick = {
                                         onSongClick(tracks, tracks.indexOf(song).coerceAtLeast(0))
                                     },
@@ -356,7 +364,7 @@ fun SearchScreen(
                                     onSwipeToQueue = { onSongSwipe(song) },
                                     showDuration = false,
                                     subtitle = buildSearchSubtitle(
-                                        typeLabel = stringResource(R.string.shelf_song_item),
+                                        typeLabel = song.shelfTypeLabel(),
                                         detail = song.searchArtistNames(),
                                     ),
                                 )
@@ -591,11 +599,17 @@ private fun TypeaheadSongRow(
             .padding(horizontal = PAGE_GUTTER, vertical = SearchResultRowPaddingV),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        val widescreenArt = song.isVideo
+        val artModifier = if (widescreenArt) {
+            Modifier.height(SearchResultArtSize).aspectRatio(16f / 9f)
+        } else {
+            Modifier.size(SearchResultArtSize)
+        }
         AsyncImage(
             model = song.artworkAt(ROW_ART_PX),
             contentDescription = null,
-            modifier = Modifier
-                .size(SearchResultArtSize)
+            contentScale = if (widescreenArt) ContentScale.Crop else ContentScale.Fit,
+            modifier = artModifier
                 .clip(searchSquareArtShape())
                 .thumbnailBorder(searchSquareArtShape())
                 .background(MaterialTheme.colorScheme.surfaceVariant),
@@ -605,7 +619,7 @@ private fun TypeaheadSongRow(
             SearchResultTitle(text = song.title)
             Spacer(Modifier.height(2.dp))
             SearchEntitySubtitle(
-                typeLabel = stringResource(R.string.shelf_song_item),
+                typeLabel = song.shelfTypeLabel(),
                 detail = song.searchArtistNames(),
             )
         }
@@ -620,100 +634,101 @@ private fun TypeaheadSongRow(
 private fun LazyListScope.recentSearches(
     history: List<SearchHistoryEntity>,
     onClick: (SearchHistoryEntity) -> Unit,
-    onRemove: (String) -> Unit,
     onClear: () -> Unit,
+    onSongLongPress: (Song) -> Unit,
+    onSongSwipe: (Song) -> Unit,
+    onBrowseLongPress: ((BrowseItem) -> Unit)?,
 ) {
     item(key = "recent:header") {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = PAGE_GUTTER, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = stringResource(R.string.recent_searches),
-                style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.weight(1f),
-            )
-            Text(
-                text = stringResource(R.string.clear),
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary,
+        Column(Modifier.fillMaxWidth()) {
+            Row(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(percent = 50))
-                    .clickable(onClick = onClear)
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                    .fillMaxWidth()
+                    .padding(horizontal = PAGE_GUTTER, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(R.string.recent_searches),
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = stringResource(R.string.clear),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(percent = 50))
+                        .clickable(onClick = onClear)
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                )
+            }
+            HorizontalDivider(
+                modifier = Modifier.padding(horizontal = PAGE_GUTTER),
+                thickness = 0.5.dp,
+                color = MaterialTheme.colorScheme.outline,
             )
         }
     }
-    items(history, key = { "recent:${it.id}" }) { entity ->
-        RecentSearchEntityRow(
-            entity = entity,
-            onClick = { onClick(entity) },
-            onRemove = { onRemove(entity.id) },
-        )
+    itemsIndexed(
+        items = history,
+        key = { _, entity -> "recent:${entity.id}" },
+    ) { index, entity ->
+        when (entity.entityType) {
+            EntityType.TRACK, EntityType.MUSIC_VIDEO -> {
+                val song = entity.toRecentSong()
+                SongRow(
+                    song = song,
+                    modifier = Modifier.padding(vertical = 6.dp),
+                    artworkSize = SearchResultArtSize,
+                    artworkCornerRadius = SearchSquareArtCorner,
+                    widescreenArtwork = entity.entityType == EntityType.MUSIC_VIDEO,
+                    onClick = { onClick(entity) },
+                    onLongPress = { onSongLongPress(song) },
+                    onSwipeToQueue = { onSongSwipe(song) },
+                    showDuration = false,
+                    subtitle = buildSearchSubtitle(
+                        typeLabel = song.shelfTypeLabel(),
+                        detail = entity.subtitle,
+                    ),
+                )
+            }
+            EntityType.ALBUM, EntityType.ARTIST, EntityType.PLAYLIST -> {
+                val item = entity.toBrowseItem()
+                BrowseRow(
+                    item = item,
+                    onClick = { onClick(entity) },
+                    onLongPress = onBrowseLongPress?.let { { it(item) } },
+                )
+            }
+        }
+        if (index < history.lastIndex) {
+            HorizontalDivider(
+                modifier = Modifier.padding(horizontal = PAGE_GUTTER),
+                thickness = 0.5.dp,
+                color = MaterialTheme.colorScheme.outline,
+            )
+        }
     }
 }
 
-/**
- * Spotify-style entity row: square thumbnail, bold title, subtitle with type,
- * and a removal button. Tapping navigates to the entity or plays it directly.
- */
-@Composable
-private fun RecentSearchEntityRow(
-    entity: SearchHistoryEntity,
-    onClick: () -> Unit,
-    onRemove: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(
-                start = PAGE_GUTTER,
-                end = 8.dp,
-                top = SearchResultRowPaddingV,
-                bottom = SearchResultRowPaddingV,
-            ),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        AsyncImage(
-            model = entity.artworkUrl,
-            contentDescription = null,
-            modifier = Modifier
-                .size(SearchResultArtSize)
-                .clip(searchSquareArtShape())
-                .thumbnailBorder(searchSquareArtShape())
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-        )
-        Spacer(Modifier.width(14.dp))
-        Column(Modifier.weight(1f)) {
-            SearchResultTitle(text = entity.title)
-            Spacer(Modifier.height(2.dp))
-            SearchEntitySubtitle(
-                typeLabel = searchEntityTypeLabel(entity.entityType),
-                detail = when (entity.entityType) {
-                    EntityType.TRACK -> entity.subtitle
-                    else -> browseSearchDetail(entity.subtitle, entity.entityType.toBrowseType())
-                },
-            )
-        }
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .clickable(onClick = onRemove),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                Icons.Rounded.Close,
-                contentDescription = stringResource(R.string.recent_search_remove, entity.title),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(18.dp),
-            )
-        }
-    }
+private fun SearchHistoryEntity.toRecentSong(): Song = Song(
+    videoId = id,
+    title = title,
+    artist = subtitle,
+    thumbnailUrl = artworkUrl,
+    isVideo = entityType == EntityType.MUSIC_VIDEO,
+)
+
+private fun SearchHistoryEntity.toBrowseItem(): BrowseItem {
+    val browseType = entityType.toBrowseType()
+    return BrowseItem(
+        browseId = id,
+        title = title,
+        subtitle = subtitle,
+        thumbnailUrl = artworkUrl,
+        type = browseType,
+    )
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -816,7 +831,7 @@ private fun EntityType.toBrowseType(): BrowseType = when (this) {
     EntityType.ARTIST -> BrowseType.ARTIST
     EntityType.ALBUM -> BrowseType.ALBUM
     EntityType.PLAYLIST -> BrowseType.PLAYLIST
-    EntityType.TRACK -> BrowseType.OTHER
+    EntityType.TRACK, EntityType.MUSIC_VIDEO -> BrowseType.OTHER
 }
 
 private val SEARCH_KIND_WORDS = setOf(
@@ -884,6 +899,7 @@ private fun browseSearchTypeLabel(type: BrowseType): String = when (type) {
 @Composable
 private fun searchEntityTypeLabel(type: EntityType): String = when (type) {
     EntityType.TRACK -> stringResource(R.string.shelf_song_item)
+    EntityType.MUSIC_VIDEO -> stringResource(R.string.shelf_music_video_item)
     EntityType.ALBUM -> stringResource(R.string.album)
     EntityType.ARTIST -> stringResource(R.string.artist)
     EntityType.PLAYLIST -> stringResource(R.string.playlist)

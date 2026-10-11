@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -32,6 +34,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.PlatformTextStyle
@@ -208,11 +211,17 @@ fun MiniPlayer(
             } else {
                 Color.Black.copy(alpha = 0.08f)
             }
+            val widescreenArt = song.isVideo
+            val artModifier = if (widescreenArt) {
+                Modifier.height(ART_SIZE).aspectRatio(16f / 9f)
+            } else {
+                Modifier.size(ART_SIZE)
+            }
             AsyncImage(
                 model = rememberRemoteArtworkUrl(song)?.artworkAt(ROW_ART_PX),
                 contentDescription = null,
-                modifier = Modifier
-                    .size(ART_SIZE)
+                contentScale = if (widescreenArt) ContentScale.Crop else ContentScale.Fit,
+                modifier = artModifier
                     .clip(artShape)
                     .background(MaterialTheme.colorScheme.surfaceVariant)
                     .border(0.5.dp, artHighlight, artShape),

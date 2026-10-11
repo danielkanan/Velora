@@ -606,6 +606,7 @@ internal fun localizeCardSubtitle(subtitle: String): String {
     val delimiter = " • "
     val parts = subtitle.split(delimiter)
     val songLabel = stringResource(R.string.shelf_song_item)
+    val musicVideoLabel = stringResource(R.string.shelf_music_video_item)
     val singleLabel = stringResource(R.string.shelf_single)
     val chartLabel = stringResource(R.string.shelf_chart)
     val playlistLabel = stringResource(R.string.playlist)
@@ -615,6 +616,8 @@ internal fun localizeCardSubtitle(subtitle: String): String {
         when {
             trimmed.equals("Song", ignoreCase = true) || trimmed.equals("Titre", ignoreCase = true) ||
                 trimmed.equals("Bài hát", ignoreCase = true) || trimmed.equals("曲", ignoreCase = true) -> songLabel
+            trimmed.equals("Video", ignoreCase = true) || trimmed.equals("Music video", ignoreCase = true) ||
+                trimmed.equals("Music Video", ignoreCase = true) -> musicVideoLabel
             trimmed.equals("Single", ignoreCase = true) || trimmed.equals("Đĩa đơn", ignoreCase = true) ||
                 trimmed.equals("シングル", ignoreCase = true) -> singleLabel
             trimmed.equals("Chart", ignoreCase = true) || trimmed.equals("Bảng xếp hạng", ignoreCase = true) ||

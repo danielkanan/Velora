@@ -2361,6 +2361,8 @@ private fun VeloraApp(
                     QueueCoordinator.clearUserQueue(c)
                 }
             },
+            musicVideoPlayback = displayedSong.isMusicVideoPlayback(keepVideoId),
+            mediaController = controller,
         )
     }
 
@@ -2944,8 +2946,17 @@ private fun VeloraApp(
                                         title = song.title,
                                         subtitle = song.artist.ifEmpty { "" },
                                         artworkUrl = song.thumbnailUrl,
-                                        entityType = EntityType.TRACK,
+                                        entityType = if (song.isVideo || filter == SearchFilter.VIDEOS) {
+                                            EntityType.MUSIC_VIDEO
+                                        } else {
+                                            EntityType.TRACK
+                                        },
                                     ))
+                                    if (song.isVideo &&
+                                        (filter == SearchFilter.VIDEOS || !preferMusicOnly)
+                                    ) {
+                                        keepVideoId = song.videoId
+                                    }
                                     playRadio(song, QueueSource(searchLabel, PlaybackSourceType.SEARCH))
                                 }
                             },
@@ -2998,14 +3009,16 @@ private fun VeloraApp(
                                 // Do NOT recordEntity here — tapping an existing history item
                                 // must not update its timestamp and push it to the top.
                                 when (entity.entityType) {
-                                    EntityType.TRACK -> {
-                                        // Play the track by its video id
+                                    EntityType.TRACK, EntityType.MUSIC_VIDEO -> {
+                                        val isMusicVideo = entity.entityType == EntityType.MUSIC_VIDEO
+                                        if (isMusicVideo) keepVideoId = entity.id
                                         playRadio(
                                             com.music.velora.data.model.Song(
                                                 videoId = entity.id,
                                                 title = entity.title,
                                                 artist = entity.subtitle,
                                                 thumbnailUrl = entity.artworkUrl,
+                                                isVideo = isMusicVideo,
                                             ),
                                             QueueSource(entity.title, PlaybackSourceType.SEARCH),
                                         )
@@ -3020,7 +3033,6 @@ private fun VeloraApp(
                                     }
                                 }
                             },
-                            onHistoryRemove = viewModel::removeSearch,
                             onHistoryClear = viewModel::clearSearchHistory,
                             onTypeaheadLongPress = openSongMenu,
                             contentPadding = rootListPadding,
@@ -3515,7 +3527,7 @@ private fun VeloraApp(
                         selectedIndex = selectedTab,
                         onTabSelected = onTabSelected,
                         hazeState = hazeState,
-                        song = player.song,
+                        song = playerSong?.presentAsMusicVideo(keepVideoId),
                         isPlaying = player.isPlaying,
                         isLoading = playPauseBusy,
                         onPlayPause = {
@@ -3926,8 +3938,11 @@ private fun VeloraApp(
             }
         }
 
-        // ---- Go to Artist / Go to Album (multi-credit or album tracks) ----
+        // ---- Go to Artist / Go to Album (multi-credit tracks) ----
         songDestinations?.let { song ->
+            val omitAlbumBrowseId = detail
+                ?.takeIf { it.type == BrowseType.ALBUM }
+                ?.browseId
             ModalBottomSheet(
                 onDismissRequest = { songDestinations = null },
                 containerColor = Color.Transparent,
@@ -3938,6 +3953,7 @@ private fun VeloraApp(
                     song = song,
                     hazeState = hazeState,
                     pagePalette = detail?.let { detailPalette },
+                    omitAlbumBrowseId = omitAlbumBrowseId,
                     onOpenArtist = { id, name ->
                         songDestinations = null
                         showNowPlaying = false
@@ -4796,6 +4812,15 @@ private fun VeloraApp(
 
     }
 }
+
+private fun Song.presentAsMusicVideo(keepVideoId: String?): Song = when {
+    isVideo -> this
+    keepVideoId != null && videoId == keepVideoId -> copy(isVideo = true)
+    else -> this
+}
+
+private fun Song.isMusicVideoPlayback(keepVideoId: String?): Boolean =
+    presentAsMusicVideo(keepVideoId).isVideo
 
 private fun tween(durationMillis: Int) =
     androidx.compose.animation.core.tween<Float>(durationMillis)

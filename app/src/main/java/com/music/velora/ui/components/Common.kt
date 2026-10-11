@@ -101,6 +101,15 @@ fun Modifier.thumbnailBorder(shape: Shape): Modifier = composed {
     )
 }
 
+/** Row subtitle type for a catalogue track vs a music-video upload. */
+@Composable
+fun shelfTypeLabelForSong(isVideo: Boolean): String =
+    if (isVideo) stringResource(R.string.shelf_music_video_item)
+    else stringResource(R.string.shelf_song_item)
+
+@Composable
+fun Song.shelfTypeLabel(): String = shelfTypeLabelForSong(isVideo)
+
 /**
  * The left and right inset every page's content sits at.
  *
