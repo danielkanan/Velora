@@ -14,6 +14,7 @@ import com.music.velora.data.model.MoodGenre
 import com.music.velora.data.model.PlaylistPrivacy
 import com.music.velora.data.model.MoodGenreSection
 import com.music.velora.data.model.SearchResult
+import com.music.velora.data.search.SearchRanker
 import com.music.velora.data.model.ShelfItem
 import com.music.velora.data.model.Song
 import com.music.velora.data.model.SongMenu
@@ -689,6 +690,7 @@ object InnertubeParser {
             // art where a catalogue track has square album cover art.
             isVideo = rowType == "video" || thumbnails.isNotSquare(),
             isExplicit = renderer.hasExplicitBadge(),
+            engagementScore = engagementFromParts(parts),
         )
     }
 
@@ -734,8 +736,12 @@ object InnertubeParser {
             albumName = credits.albumName,
             isVideo = rowType == "video" || thumbnails.isNotSquare(),
             isExplicit = renderer["subtitleBadges"].hasExplicitBadge(),
+            engagementScore = engagementFromParts(parts),
         )
     }
+
+    private fun engagementFromParts(parts: List<String>): Long =
+        parts.mapNotNull { SearchRanker.parseEngagement(it) }.maxOrNull() ?: 0L
 
     /**
      * Who the rows inside a promoted card are by, or null if the card isn't

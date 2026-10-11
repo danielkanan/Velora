@@ -45,6 +45,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -63,6 +64,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -401,6 +403,12 @@ fun SongRow(
     selected: Boolean = false,
     /** Album track lists hide the trailing time; feeds and playlists keep it. */
     showDuration: Boolean = true,
+    /** When set, replaces the default artist / format subtitle line. */
+    subtitle: String? = null,
+    artworkSize: Dp = 52.dp,
+    artworkCornerRadius: Dp = 8.dp,
+    /** 16:9 frame for music-video rows (search), instead of a square tile. */
+    widescreenArtwork: Boolean = false,
 ) {
     val haptics = rememberHaptics()
     val swipeStateHolder = remember { mutableStateOf<SwipeToDismissBoxState?>(null) }
@@ -439,6 +447,10 @@ fun SongRow(
             activeTint = activeTint,
             selected = selected,
             showDuration = showDuration,
+            subtitle = subtitle,
+            artworkSize = artworkSize,
+            artworkCornerRadius = artworkCornerRadius,
+            widescreenArtwork = widescreenArtwork,
         )
         return
     }
@@ -486,6 +498,10 @@ fun SongRow(
             activeTint = activeTint,
             selected = selected,
             showDuration = showDuration,
+            subtitle = subtitle,
+            artworkSize = artworkSize,
+            artworkCornerRadius = artworkCornerRadius,
+            widescreenArtwork = widescreenArtwork,
         )
     }
 }
@@ -553,21 +569,31 @@ private fun SongRowContent(
     activeTint: Color = MaterialTheme.colorScheme.primary,
     selected: Boolean = false,
     showDuration: Boolean = true,
+    subtitle: String? = null,
+    artworkSize: Dp = 52.dp,
+    artworkCornerRadius: Dp = 8.dp,
+    widescreenArtwork: Boolean = false,
 ) {
+    val artworkShape = RoundedCornerShape(artworkCornerRadius)
+    val artworkModifier = if (widescreenArtwork) {
+        Modifier.height(artworkSize).aspectRatio(16f / 9f)
+    } else {
+        Modifier.size(artworkSize)
+    }
     // Selection still washes the row; the playing track only swaps the index
     // for the eq glyph — no accent tint on the title or the cell.
     val activeBackground by animateColorAsState(
         targetValue = if (selected) activeTint.copy(alpha = 0.14f) else Color.Transparent,
         label = "song row background",
     )
-    val subtitle = listOfNotNull(
+    val subtitleLine = subtitle ?: listOfNotNull(
         song.artist.takeIf { it.isNotBlank() },
         song.downloadFormat,
     ).joinToString(" · ")
     // Album tracks that only show a title (no guest line) used to keep the
     // full 52dp artwork slot and looked oddly airy — shrink that cell and the
     // vertical pad so the change is visible.
-    val titleOnlyNumbered = trackNumber != null && subtitle.isBlank()
+    val titleOnlyNumbered = trackNumber != null && subtitleLine.isBlank()
     // A Spotify track still being matched to a YouTube Music song, or one that
     // has no match: shown, but not something a tap or a menu can act on.
     val matching = song.isMatchPending
@@ -609,10 +635,10 @@ private fun SongRowContent(
             AsyncImage(
                 model = rememberRemoteArtworkUrl(song)?.artworkAt(ROW_ART_PX),
                 contentDescription = null,
-                modifier = Modifier
-                    .size(52.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .thumbnailBorder(RoundedCornerShape(8.dp))
+                contentScale = if (widescreenArtwork) ContentScale.Crop else ContentScale.Fit,
+                modifier = artworkModifier
+                    .clip(artworkShape)
+                    .thumbnailBorder(artworkShape)
                     .background(MaterialTheme.colorScheme.surfaceVariant),
             )
         }
@@ -626,10 +652,10 @@ private fun SongRowContent(
                 ),
                 color = MaterialTheme.colorScheme.onBackground,
             )
-            if (subtitle.isNotBlank()) {
+            if (subtitleLine.isNotBlank()) {
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    text = subtitle,
+                    text = subtitleLine,
                     style = MaterialTheme.typography.bodyMedium,
                     color = subtitleColor,
                     maxLines = 1,

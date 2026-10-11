@@ -264,9 +264,10 @@ import com.music.velora.ui.screens.LocalMusicScreen
 import com.music.velora.ui.screens.HomeScreen
 import com.music.velora.ui.screens.LibraryGridPage
 import com.music.velora.ui.screens.MoodGenrePlaylistsScreen
-import com.music.velora.ui.screens.SearchFieldChromeHeight
 import com.music.velora.ui.screens.SearchScreen
+import com.music.velora.ui.components.SearchField
 import com.music.velora.ui.screens.SearchScreenChrome
+import com.music.velora.ui.screens.searchFilterChromeTopPadding
 import com.music.velora.data.settings.SongSort
 import com.music.velora.ui.replay.ReplayScreen
 import com.music.velora.ui.replay.cards
@@ -553,7 +554,7 @@ private fun VeloraApp(
     // Owned here so app chrome can host the field and still receive the
     // tab-tap focus request.
     val searchFocusRequester = remember { FocusRequester() }
-    var searchChromeHeight by remember { mutableStateOf(SearchFieldChromeHeight) }
+    var searchChromeHeight by remember { mutableStateOf(0.dp) }
     val searchKeyboard = LocalSoftwareKeyboardController.current
     // Invalidates an in-flight radio lookup when a later play request wins.
     var playRequestGeneration by remember { mutableIntStateOf(0) }
@@ -2950,27 +2951,6 @@ private fun VeloraApp(
                             },
                             onSongLongPress = openSongMenu,
                             onSongSwipe = onSongSwipe,
-                            onTopResultPlay = { song ->
-                                viewModel.recordEntity(SearchHistoryEntity(
-                                    id = song.videoId,
-                                    title = song.title,
-                                    subtitle = song.artist.ifEmpty { "" },
-                                    artworkUrl = song.thumbnailUrl,
-                                    entityType = EntityType.TRACK,
-                                ))
-                                playRadio(song, QueueSource(searchLabel, PlaybackSourceType.SEARCH))
-                            },
-                            onTopResultPlaylist = { song ->
-                                viewModel.recordEntity(SearchHistoryEntity(
-                                    id = song.videoId,
-                                    title = song.title,
-                                    subtitle = song.artist.ifEmpty { "" },
-                                    artworkUrl = song.thumbnailUrl,
-                                    entityType = EntityType.TRACK,
-                                ))
-                                viewModel.loadPlaylists()
-                                playlistTarget = song
-                            },
                             onBrowseClick = { item ->
                                 viewModel.recordEntity(SearchHistoryEntity(
                                     id = item.browseId ?: "",
@@ -3131,11 +3111,19 @@ private fun VeloraApp(
                         },
                 )
 
+                val showSearchChrome = selectedTab == TAB_SEARCH &&
+                    detail == null &&
+                    selectedMoodGenre == null &&
+                    libraryShowAll == null &&
+                    !showSettings && !showAccountScrobbling && !showSpotify && !showSources &&
+                    !showListenTogether && !showEqualizer &&
+                    !showDiscord && !showHistory && !showReplay
                 val showRootTabHeading = !showSpotify && !showDiscord && !showHistory &&
                     !(libraryShowAll != null && detail == null) &&
                     !showAccountScrobbling && !showSources && !showListenTogether &&
                     !showEqualizer && !showSettings && !showReplay &&
-                    detail == null && selectedMoodGenre == null
+                    detail == null && selectedMoodGenre == null &&
+                    selectedTab != TAB_SEARCH
                 if (showRootTabHeading) {
                     RootTabHeading(
                         listState = currentListState,
@@ -3150,6 +3138,16 @@ private fun VeloraApp(
                             .align(Alignment.TopCenter)
                             .padding(top = stableStatusBarTopPadding()),
                     )
+                }
+
+                if (showSearchChrome) {
+                    LaunchedEffect(searchFocusRequested, showSearchChrome) {
+                        if (searchFocusRequested) {
+                            searchFocusRequester.requestFocus()
+                            searchKeyboard?.show()
+                            searchFocusRequested = false
+                        }
+                    }
                 }
 
                 FrostedTopBar(
@@ -3208,6 +3206,20 @@ private fun VeloraApp(
                         else -> null
                     },
                     modifier = Modifier.align(Alignment.TopCenter),
+                    leadingBarContent = if (showSearchChrome) {
+                        {
+                            SearchField(
+                                query = query,
+                                onQueryChange = viewModel::onQueryChange,
+                                onSubmit = viewModel::submitSearch,
+                                focusRequester = searchFocusRequester,
+                                hazeState = hazeState,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    } else {
+                        null
+                    },
                     actions = {
                         // This is intentionally scoped to Listen together: the
                         // round-trip time is meaningful while coordinating a
@@ -3445,28 +3457,9 @@ private fun VeloraApp(
                     },
                 )
 
-                // Floating search field — sibling of FrostedTopBar / GlassNavBar.
-                val showSearchChrome = selectedTab == TAB_SEARCH &&
-                    detail == null &&
-                    selectedMoodGenre == null &&
-                    libraryShowAll == null &&
-                    !showSettings && !showAccountScrobbling && !showSpotify && !showSources &&
-                    !showListenTogether && !showEqualizer &&
-                    !showDiscord && !showHistory && !showReplay
                 if (showSearchChrome) {
                     val showSearchFilters = results != null && searchSuggestions.isEmpty()
-                    LaunchedEffect(searchFocusRequested, showSearchChrome) {
-                        if (searchFocusRequested) {
-                            searchFocusRequester.requestFocus()
-                            searchKeyboard?.show()
-                            searchFocusRequested = false
-                        }
-                    }
                     SearchScreenChrome(
-                        query = query,
-                        onQueryChange = viewModel::onQueryChange,
-                        onSubmit = viewModel::submitSearch,
-                        focusRequester = searchFocusRequester,
                         showFilters = showSearchFilters,
                         filter = filter,
                         onFilterChange = viewModel::onFilterChange,
@@ -3474,7 +3467,7 @@ private fun VeloraApp(
                         onHeightChanged = { searchChromeHeight = it },
                         modifier = Modifier
                             .align(Alignment.TopCenter)
-                            .padding(top = topBarContentPadding()),
+                            .padding(top = searchFilterChromeTopPadding()),
                     )
                 }
 

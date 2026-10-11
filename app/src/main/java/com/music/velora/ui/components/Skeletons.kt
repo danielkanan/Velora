@@ -113,14 +113,27 @@ private fun SectionHeaderSkeleton(index: Int = 0) {
  * [circular] matches the browse rows, where artists are drawn as circles.
  */
 @Composable
-fun SongRowSkeleton(index: Int = 0, circular: Boolean = false, modifier: Modifier = Modifier) {
+fun SongRowSkeleton(
+    index: Int = 0,
+    circular: Boolean = false,
+    modifier: Modifier = Modifier,
+    artSize: Dp = 52.dp,
+    cornerRadius: Dp = 8.dp,
+    widescreenArt: Boolean = false,
+) {
+    val artShape = if (circular) CircleShape else RoundedCornerShape(cornerRadius)
+    val artModifier = if (widescreenArt) {
+        Modifier.height(artSize).aspectRatio(16f / 9f)
+    } else {
+        Modifier.size(artSize)
+    }
     Row(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = PAGE_GUTTER, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ShimmerBox(Modifier.size(52.dp), if (circular) CircleShape else RoundedCornerShape(8.dp))
+        ShimmerBox(artModifier, artShape)
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             SkeletonLine(fraction = TitleWidths[index % TitleWidths.size], height = 14.dp)
@@ -136,10 +149,19 @@ fun LazyListScope.songListSkeleton(
     keyPrefix: String = "skeleton:song",
     circular: Boolean = false,
     alpha: Float = 1f,
+    artSize: Dp = 52.dp,
+    cornerRadius: Dp = 8.dp,
+    widescreenArt: Boolean = false,
 ) {
     items(count, key = { "$keyPrefix:$it" }) { index ->
         Box(Modifier.graphicsLayer { this.alpha = alpha }) {
-            SongRowSkeleton(index = index, circular = circular)
+            SongRowSkeleton(
+                index = index,
+                circular = circular,
+                artSize = artSize,
+                cornerRadius = cornerRadius,
+                widescreenArt = widescreenArt,
+            )
         }
     }
 }

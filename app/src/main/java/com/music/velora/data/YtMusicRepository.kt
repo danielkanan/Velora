@@ -16,6 +16,7 @@ import com.music.velora.data.model.playlistMoves
 import com.music.velora.data.model.PlaylistPrivacy
 import com.music.velora.data.model.SearchFilter
 import com.music.velora.data.model.SearchResult
+import com.music.velora.data.search.SearchRanker
 import com.music.velora.data.model.ShelfItem
 import com.music.velora.data.model.Song
 import com.music.velora.data.model.SongMenu
@@ -291,15 +292,148 @@ object YtMusicRepository {
      * search responsive; the UI asks [searchContinuation] for later pages as
      * the listener reaches the end of the list.
      */
+    /**
+     * Fast first page — parallel typo fix only, no suggest/extra-tab round trips.
+     * Call [enrichSearchPage] in the background for Top results / Songs quality.
+     */
     suspend fun searchPage(query: String, filter: SearchFilter): Result<SearchPage> =
         call("search:${filter.name}") {
-            InnertubeParser.parseSearchPage(
-                Innertube.search(query, filter.params),
-                includeVideos = filter == SearchFilter.VIDEOS,
-            ).let { page ->
-                SearchPage(page.rows.distinctBy { it.identityKey() }, page.continuation)
+            coroutineScope {
+                assembleSearchPage(
+                    query,
+                    filter,
+                    fetchSearchPages(query, filter, fastApiQueries(query)),
+                )
             }
         }
+
+    /** Heavier merges (Songs/Artists/Albums tabs + suggestions) after [searchPage]. */
+    suspend fun enrichSearchPage(
+        query: String,
+        filter: SearchFilter,
+        base: SearchPage,
+    ): Result<SearchPage> = call("search:enrich:${filter.name}") {
+        val rows = when (filter) {
+            SearchFilter.ALL -> enrichAllTab(query, base.rows)
+            SearchFilter.SONGS -> enrichSongsTab(query, base.rows)
+            else -> base.rows
+        }
+        SearchPage(rows.distinctBy { it.identityKey() }, base.continuation)
+    }
+
+    private suspend fun fetchSearchPages(
+        query: String,
+        filter: SearchFilter,
+        queries: List<String>,
+    ): List<InnertubeParser.SearchPage> = coroutineScope {
+        queries.map { q ->
+            async {
+                InnertubeParser.parseSearchPage(
+                    Innertube.search(q, filter.params),
+                    includeVideos = filter == SearchFilter.VIDEOS,
+                )
+            }
+        }.awaitAll()
+    }
+
+    private fun assembleSearchPage(
+        query: String,
+        filter: SearchFilter,
+        pages: List<InnertubeParser.SearchPage>,
+    ): SearchPage {
+        val primary = pages.first()
+        val combined = pages.flatMap { it.rows }
+        var rows = SearchRanker.rank(query, filter, combined)
+        if (filter == SearchFilter.ALL) {
+            rows = SearchRanker.composeAllTab(query, rows)
+        }
+        return SearchPage(rows.distinctBy { it.identityKey() }, primary.continuation)
+    }
+
+    /** Instant path: typed query + local spelling fix (e.g. weekend → weeknd). */
+    private fun fastApiQueries(query: String): List<String> {
+        val trimmed = query.trim()
+        if (trimmed.isEmpty()) return emptyList()
+        return buildList {
+            add(trimmed)
+            SearchRanker.artistSearchQueries(trimmed).forEach { q ->
+                if (!any { it.equals(q, ignoreCase = true) }) add(q)
+            }
+        }.distinctBy { SearchRanker.normalize(it) }
+    }
+
+    /** Slower path: YouTube suggestions + extra tab fetches (used in enrich only). */
+    private suspend fun suggestedApiQueries(query: String): List<String> {
+        val trimmed = query.trim()
+        val suggestions = searchSuggestions(trimmed).getOrNull().orEmpty()
+        return buildList {
+            add(trimmed)
+            addAll(SearchRanker.alternateSearchQueries(trimmed, suggestions))
+        }.distinctBy { SearchRanker.normalize(it) }
+    }
+
+    /**
+     * Top results: catalogue tracks come from the Songs tab (and suggestions),
+     * not the All tab's upload-heavy list; All tab supplies browse rows only.
+     */
+    private suspend fun enrichAllTab(query: String, rows: List<SearchResult>): List<SearchResult> =
+        coroutineScope {
+            val words = SearchRanker.queryForMatching(query)
+                .split(" ")
+                .count { it.isNotBlank() }
+            val browseFromAll = rows.filterIsInstance<SearchResult.Browse>()
+            val promoted = SearchRanker.asTracks(
+                rows.filterIsInstance<SearchResult.TopTrack>(),
+            )
+            val songQueries = suggestedApiQueries(query)
+            val songRows = songQueries.map { q ->
+                async { searchRowsRaw(q, SearchFilter.SONGS) }
+            }.awaitAll().flatten()
+            val rankedTracks = SearchRanker.rank(
+                query,
+                SearchFilter.SONGS,
+                SearchRanker.asTracks(songRows) + promoted,
+            )
+            val extraBrowse = buildList {
+                if (words <= 2) {
+                    SearchRanker.artistSearchQueries(query).forEach { q ->
+                        addAll(searchRowsRaw(q, SearchFilter.ARTISTS))
+                    }
+                }
+                if (words >= 3) {
+                    addAll(searchRowsRaw(query, SearchFilter.ALBUMS))
+                    addAll(searchRowsRaw(query, SearchFilter.PLAYLISTS))
+                } else {
+                    addAll(searchRowsRaw(query, SearchFilter.ALBUMS))
+                }
+            }
+            val pool = rankedTracks + browseFromAll + extraBrowse.filterIsInstance<SearchResult.Browse>()
+            val merged = SearchRanker.rank(query, SearchFilter.ALL, pool.distinctBy { it.identityKey() })
+            SearchRanker.composeAllTab(query, merged)
+        }
+
+    private suspend fun enrichSongsTab(query: String, rows: List<SearchResult>): List<SearchResult> =
+        coroutineScope {
+            val extra = suggestedApiQueries(query).map { q ->
+                async {
+                    val allTab = InnertubeParser.parseSearchPage(Innertube.search(q, null), false)
+                    buildList {
+                        allTab.rows.filterIsInstance<SearchResult.TopTrack>().forEach {
+                            add(SearchResult.Track(it.song))
+                        }
+                        allTab.rows.filterIsInstance<SearchResult.Track>().forEach(::add)
+                        addAll(searchRowsRaw(q, SearchFilter.SONGS))
+                    }
+                }
+            }.awaitAll().flatten()
+            SearchRanker.mergeAndRank(query, SearchFilter.SONGS, rows, extra)
+        }
+
+    private suspend fun searchRowsRaw(query: String, filter: SearchFilter): List<SearchResult> =
+        InnertubeParser.parseSearchPage(
+            Innertube.search(query, filter.params),
+            includeVideos = false,
+        ).rows
 
     /** Fetches the next page of a search only when the result list needs it. */
     suspend fun searchContinuation(token: String, filter: SearchFilter): Result<SearchPage> = call("search:continuation") {
@@ -307,7 +441,12 @@ object YtMusicRepository {
             Innertube.searchContinuation(token),
             includeVideos = filter == SearchFilter.VIDEOS,
         ).let { page ->
-            SearchPage(page.rows.distinctBy { it.identityKey() }, page.continuation)
+            val rows = if (filter == SearchFilter.ALL) {
+                page.rows.filterIsInstance<SearchResult.Browse>()
+            } else {
+                page.rows
+            }
+            SearchPage(rows.distinctBy { it.identityKey() }, page.continuation)
         }
     }
 

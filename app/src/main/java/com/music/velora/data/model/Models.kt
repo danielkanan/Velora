@@ -23,6 +23,11 @@ data class Song(
     val artist: String,
     val thumbnailUrl: String?,
     val durationText: String? = null,
+    /**
+     * Views/plays parsed from a search row subtitle — used only to rank results,
+     * not shown in the UI.
+     */
+    val engagementScore: Long = 0L,
     /** Browse ids lifted from the row, used by the long-press actions. */
     val artistId: String? = null,
     /**
@@ -298,21 +303,31 @@ data class BrowseItem(
 
 /** Search rows are heterogeneous once filters other than "Songs" are used. */
 sealed interface SearchResult {
-    /** The promoted card returned only at the head of an unfiltered search. */
+    /** Card-shelf song on the All tab (same row treatment as [Track] in the UI). */
     data class TopTrack(val song: Song) : SearchResult
     data class Track(val song: Song) : SearchResult
     data class Browse(val item: BrowseItem) : SearchResult
 }
 
 enum class SearchFilter(val label: String, val params: String?) {
-    /** YouTube Music's mixed search page: songs, artists, albums and playlists. */
-    ALL("All", null),
+    /** Mixed search — songs, artists, albums, and playlists on one page. */
+    ALL("Top results", null),
     SONGS("Songs", "EgWKAQIIAWoKEAkQChAFEAMQBA=="),
-    VIDEOS("Videos", "EgWKAQIQAWoKEAkQChAFEAMQBA=="),
+    VIDEOS("Music videos", "EgWKAQIQAWoKEAkQChAFEAMQBA=="),
     ALBUMS("Albums", "EgWKAQIYAWoKEAkQChAFEAMQBA=="),
     ARTISTS("Artists", "EgWKAQIgAWoKEAkQChAFEAMQBA=="),
     PLAYLISTS("Playlists", "EgWKAQIoAWoKEAkQChAFEAMQBA=="),
 }
+
+/** Chip order on the search page — not [SearchFilter.entries] declaration order. */
+val SEARCH_FILTER_CHIP_ORDER: List<SearchFilter> = listOf(
+    SearchFilter.ALL,
+    SearchFilter.ARTISTS,
+    SearchFilter.ALBUMS,
+    SearchFilter.SONGS,
+    SearchFilter.PLAYLISTS,
+    SearchFilter.VIDEOS,
+)
 
 /** A card in a home-feed carousel: either a track (videoId) or an album/playlist (browseId). */
 data class ShelfItem(

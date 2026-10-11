@@ -28,17 +28,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.History
-import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.NorthWest
-import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -54,15 +49,19 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import coil3.compose.AsyncImage
 import com.music.velora.data.model.BrowseItem
 import com.music.velora.data.model.BrowseType
+import com.music.velora.data.model.EntityType
 import com.music.velora.data.model.ROW_ART_PX
+import com.music.velora.data.model.SEARCH_FILTER_CHIP_ORDER
 import com.music.velora.data.model.SearchFilter
 import com.music.velora.data.model.artworkAt
 import com.music.velora.data.model.SearchResult
@@ -72,10 +71,11 @@ import com.music.velora.R
 import com.music.velora.data.model.SearchHistoryEntity
 import com.music.velora.ui.components.MessageState
 import com.music.velora.ui.components.PAGE_GUTTER
-import com.music.velora.ui.components.RootPageTitle
 import com.music.velora.ui.components.topBarContentPadding
-import com.music.velora.ui.components.ROW_DIVIDER_INSET
+import com.music.velora.ui.components.topBarHeight
 import com.music.velora.ui.components.SearchField
+import com.music.velora.ui.components.frostedSurface
+import androidx.compose.runtime.SideEffect
 import com.music.velora.ui.components.SongRow
 import com.music.velora.ui.components.thumbnailBorder
 import com.music.velora.ui.components.songListSkeleton
@@ -84,22 +84,51 @@ import com.music.velora.ui.haptics.rememberHaptics
 import dev.chrisbanes.haze.HazeState
 import java.util.Locale
 
-/** Search field height + its bottom gutter — used when chrome is drawn outside. */
-val SearchFieldChromeHeight = 50.dp
-
-/** Approximate filter-tab row height (pills + vertical padding). */
+/** Filter chip row hosted below the top bar when results are showing. */
 val SearchFilterChromeHeight = 44.dp
 
+/** Vertical padding on search result rows (songs, artists, albums, history, etc.). */
+private val SearchResultRowPaddingV = 10.dp
+
+private val SearchResultArtSize = 58.dp
+private val SearchSquareArtCorner = 5.dp
+
+private fun searchSquareArtShape() = RoundedCornerShape(SearchSquareArtCorner)
+
+/** Matches [SongRow] primary line — 17sp, normal weight. */
+@Composable
+private fun searchResultTitleStyle() = MaterialTheme.typography.titleMedium.copy(
+    fontWeight = FontWeight.W400,
+    fontSize = 17.sp,
+)
+
+@Composable
+private fun SearchResultTitle(
+    text: String,
+    modifier: Modifier = Modifier,
+) {
+    Text(
+        text = text,
+        style = searchResultTitleStyle(),
+        color = MaterialTheme.colorScheme.onBackground,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier,
+    )
+}
+
+/** Space between the in-bar search field and the filter row (field bottom pad). */
+val SearchFilterBelowBarGap = 4.dp
+
+@Composable
+fun searchFilterChromeTopPadding(): Dp = topBarHeight() + SearchFilterBelowBarGap
+
 /**
- * Floating search field (+ optional filter tabs) for the frosted chrome layout.
- * Drawn from MainActivity so it sits with FrostedTopBar / GlassNavBar.
+ * Optional filter chips for the frosted chrome layout — the search field lives
+ * in [FrostedTopBar.leadingBarContent].
  */
 @Composable
 fun SearchScreenChrome(
-    query: String,
-    onQueryChange: (String) -> Unit,
-    onSubmit: () -> Unit,
-    focusRequester: FocusRequester,
     showFilters: Boolean,
     filter: SearchFilter,
     onFilterChange: (SearchFilter) -> Unit,
@@ -108,25 +137,20 @@ fun SearchScreenChrome(
     onHeightChanged: (Dp) -> Unit = {},
 ) {
     val density = LocalDensity.current
-    Column(
+    if (!showFilters) {
+        SideEffect { onHeightChanged(0.dp) }
+        return
+    }
+    SearchFilterTabs(
+        filter = filter,
+        onFilterChange = onFilterChange,
+        hazeState = hazeState,
         modifier = modifier
             .fillMaxWidth()
             .onSizeChanged { size ->
                 onHeightChanged(with(density) { size.height.toDp() })
             },
-    ) {
-        SearchField(
-            query = query,
-            onQueryChange = onQueryChange,
-            onSubmit = onSubmit,
-            focusRequester = focusRequester,
-            hazeState = hazeState,
-            modifier = Modifier.padding(start = PAGE_GUTTER, end = PAGE_GUTTER, bottom = 4.dp),
-        )
-        if (showFilters) {
-            SearchFilterTabs(filter = filter, onFilterChange = onFilterChange)
-        }
-    }
+    )
 }
 
 @Composable
@@ -145,8 +169,6 @@ fun SearchScreen(
     onSongClick: (List<Song>, Int) -> Unit,
     onSongLongPress: (Song) -> Unit,
     onSongSwipe: (Song) -> Unit,
-    onTopResultPlay: (Song) -> Unit,
-    onTopResultPlaylist: (Song) -> Unit,
     onBrowseClick: (BrowseItem) -> Unit,
     /**
      * Holding an album or playlist hit rather than tapping it — the same menu
@@ -170,7 +192,7 @@ fun SearchScreen(
      */
     embedChrome: Boolean = true,
     /** Height of externally hosted chrome when [embedChrome] is false. */
-    externalChromeHeight: Dp = SearchFieldChromeHeight,
+    externalChromeHeight: Dp = 0.dp,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues,
 ) {
@@ -216,7 +238,7 @@ fun SearchScreen(
     // with the frosted floating chrome. Otherwise keep the stacked in-page field.
     val density = LocalDensity.current
     // Seeded so the first frame already clears the field before measure lands.
-    var chromeHeight by remember { mutableStateOf(SearchFieldChromeHeight) }
+    var chromeHeight by remember { mutableStateOf(0.dp) }
 
     @Composable
     fun EmbeddedSearchChrome(modifier: Modifier = Modifier) {
@@ -234,11 +256,12 @@ fun SearchScreen(
                 focusRequester = focusRequester,
                 modifier = Modifier.padding(start = PAGE_GUTTER, end = PAGE_GUTTER, bottom = 4.dp),
             )
-            // The filters only mean something once there is a result set to narrow;
-            // they stay up for an empty or failed search too, or picking a filter
-            // that finds nothing would take away the control needed to leave it.
             if (results != null && !suggesting) {
-                SearchFilterTabs(filter = filter, onFilterChange = onFilterChange)
+                SearchFilterTabs(
+                    filter = filter,
+                    onFilterChange = onFilterChange,
+                    hazeState = null,
+                )
             }
         }
     }
@@ -259,7 +282,7 @@ fun SearchScreen(
                 if (showTypeahead) {
                     searchTypeaheadDropdown(
                         typeaheadResults = typeaheadResults,
-                        onSongClick = { song -> onTopResultPlay(song) },
+                        onSongClick = { song -> onSongClick(listOf(song), 0) },
                         onSongLongPress = onTypeaheadLongPress,
                         onBrowseClick = { item ->
                             onBrowseClick(item)
@@ -272,9 +295,17 @@ fun SearchScreen(
             } else {
                 recentSearches(history, onHistoryClick, onHistoryRemove, onHistoryClear)
             }
-            results is UiState.Loading -> songListSkeleton(circular = filter == SearchFilter.ARTISTS)
+            results is UiState.Loading -> songListSkeleton(
+                circular = filter == SearchFilter.ARTISTS,
+                artSize = SearchResultArtSize,
+                cornerRadius = SearchSquareArtCorner,
+                widescreenArt = filter == SearchFilter.VIDEOS,
+            )
             results is UiState.Error -> item { MessageState(results.message) }
             results is UiState.Success -> {
+                item(key = "search:results-top-inset") {
+                    Spacer(Modifier.height(6.dp))
+                }
                 val tracks = results.data
                     .mapNotNull { row -> when (row) {
                         is SearchResult.TopTrack -> row.song
@@ -282,18 +313,7 @@ fun SearchScreen(
                         is SearchResult.Browse -> null
                         else -> null
                     } }
-                val topResult = results.data.filterIsInstance<SearchResult.TopTrack>().firstOrNull()
-                if (filter == SearchFilter.ALL && topResult != null) {
-                    item(key = "search:top-result:${topResult.song.videoId}") {
-                        TopResultCard(
-                            song = topResult.song,
-                            onPlay = { onTopResultPlay(topResult.song) },
-                            onPlaylist = { onTopResultPlaylist(topResult.song) },
-                            onLongPress = { onSongLongPress(topResult.song) },
-                        )
-                    }
-                }
-                searchSections(results.data, filter).forEach { section ->
+                searchSections(results.data).forEach { section ->
                     section.title?.let { title ->
                         item(key = "search-section:$title") {
                             Text(
@@ -320,15 +340,27 @@ fun SearchScreen(
                         },
                     ) { index, row ->
                         when (row) {
-                            is SearchResult.TopTrack -> Unit
-                            is SearchResult.Track -> SongRow(
-                                song = row.song,
-                                onClick = {
-                                    onSongClick(tracks, tracks.indexOf(row.song).coerceAtLeast(0))
-                                },
-                                onLongPress = { onSongLongPress(row.song) },
-                                onSwipeToQueue = { onSongSwipe(row.song) },
-                            )
+                            is SearchResult.TopTrack,
+                            is SearchResult.Track -> {
+                                val song = row.searchSong()!!
+                                SongRow(
+                                    song = song,
+                                    modifier = Modifier.padding(vertical = 6.dp),
+                                    artworkSize = SearchResultArtSize,
+                                    artworkCornerRadius = SearchSquareArtCorner,
+                                    widescreenArtwork = filter == SearchFilter.VIDEOS,
+                                    onClick = {
+                                        onSongClick(tracks, tracks.indexOf(song).coerceAtLeast(0))
+                                    },
+                                    onLongPress = { onSongLongPress(song) },
+                                    onSwipeToQueue = { onSongSwipe(song) },
+                                    showDuration = false,
+                                    subtitle = buildSearchSubtitle(
+                                        typeLabel = stringResource(R.string.shelf_song_item),
+                                        detail = song.searchArtistNames(),
+                                    ),
+                                )
+                            }
                             is SearchResult.Browse -> BrowseRow(
                                 item = row.item,
                                 onClick = { onBrowseClick(row.item) },
@@ -337,7 +369,7 @@ fun SearchScreen(
                         }
                         if (index < section.rows.lastIndex) {
                             HorizontalDivider(
-                                modifier = Modifier.padding(start = ROW_DIVIDER_INSET),
+                                modifier = Modifier.padding(horizontal = PAGE_GUTTER),
                                 thickness = 0.5.dp,
                                 color = MaterialTheme.colorScheme.outline,
                             )
@@ -349,7 +381,13 @@ fun SearchScreen(
                         count = 3,
                         keyPrefix = "skeleton:search:more",
                         circular = filter == SearchFilter.ARTISTS,
+                        artSize = SearchResultArtSize,
+                        cornerRadius = SearchSquareArtCorner,
+                        widescreenArt = filter == SearchFilter.VIDEOS,
                     )
+                }
+                item(key = "search:results-bottom-inset") {
+                    Spacer(Modifier.height(6.dp))
                 }
             }
         }
@@ -362,16 +400,10 @@ fun SearchScreen(
             state = listState,
             modifier = modifier.fillMaxSize(),
             contentPadding = PaddingValues(
-                top = contentPadding.calculateTopPadding(),
+                top = searchFilterChromeTopPadding() + externalChromeHeight,
                 bottom = contentPadding.calculateBottomPadding(),
             ),
         ) {
-            item(key = "search-title") { RootPageTitle() }
-            // Holds the results below the floating field. The title sits up in
-            // the button row and scrolls away; the field stays under the bar.
-            item(key = "search-chrome-spacer") {
-                Spacer(Modifier.height(externalChromeHeight))
-            }
             searchBody()
         }
     } else {
@@ -395,91 +427,15 @@ fun SearchScreen(
 
 private data class SearchSection(val title: String?, val rows: List<SearchResult>)
 
-/** The unfiltered page is useful only when its mixed result types are readable at a glance. */
-private fun searchSections(rows: List<SearchResult>, filter: SearchFilter): List<SearchSection> {
-    if (filter != SearchFilter.ALL) return listOf(SearchSection(null, rows))
-    return listOf(
-        SearchSection("Songs", rows.filterIsInstance<SearchResult.Track>()),
-        SearchSection("Artists", rows.filterIsInstance<SearchResult.Browse>().filter { it.item.type == BrowseType.ARTIST }),
-        SearchSection("Albums", rows.filterIsInstance<SearchResult.Browse>().filter { it.item.type == BrowseType.ALBUM }),
-        SearchSection("Playlists", rows.filterIsInstance<SearchResult.Browse>().filter { it.item.type == BrowseType.PLAYLIST }),
-        SearchSection("More", rows.filterIsInstance<SearchResult.Browse>().filter { it.item.type == BrowseType.OTHER }),
-    ).filter { it.rows.isNotEmpty() }
+private fun SearchResult.searchSong(): Song? = when (this) {
+    is SearchResult.TopTrack -> song
+    is SearchResult.Track -> song
+    is SearchResult.Browse -> null
 }
 
-/** The All response carries its highest-confidence music hit as a promoted card. */
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun TopResultCard(
-    song: Song,
-    onPlay: () -> Unit,
-    onPlaylist: () -> Unit,
-    onLongPress: () -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = PAGE_GUTTER, end = PAGE_GUTTER, top = 18.dp, bottom = 8.dp)
-            .combinedClickable(onClick = onPlay, onLongClick = onLongPress),
-    ) {
-        Text(
-            text = "Top result",
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        Spacer(Modifier.height(10.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            AsyncImage(
-                model = song.thumbnailUrl?.artworkAt(ROW_ART_PX),
-                contentDescription = null,
-                modifier = Modifier.size(72.dp).clip(RoundedCornerShape(10.dp)),
-            )
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = song.title,
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = song.artist,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            IconButton(onClick = onLongPress, modifier = Modifier.size(48.dp)) {
-                Icon(
-                    Icons.Rounded.MoreVert,
-                    contentDescription = stringResource(R.string.more),
-                    tint = MaterialTheme.colorScheme.onSurface,
-                )
-            }
-        }
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedButton(
-                onClick = onPlay,
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface),
-            ) {
-                Icon(Icons.Rounded.PlayArrow, contentDescription = null)
-                Spacer(Modifier.width(6.dp))
-                Text(stringResource(R.string.play))
-            }
-            OutlinedButton(
-                onClick = onPlaylist,
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface),
-            ) {
-                Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, contentDescription = null)
-                Spacer(Modifier.width(6.dp))
-                Text(stringResource(R.string.playlist_action))
-            }
-        }
-    }
+/** Top results keeps YouTube's mixed order — each row already says what it is. */
+private fun searchSections(rows: List<SearchResult>): List<SearchSection> {
+    return listOf(SearchSection(null, rows))
 }
 
 /**
@@ -533,8 +489,8 @@ private fun SuggestionRow(
             .padding(
                 start = PAGE_GUTTER,
                 end = 8.dp,
-                top = 6.dp,
-                bottom = 6.dp,
+                top = SearchResultRowPaddingV,
+                bottom = SearchResultRowPaddingV,
             ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -545,15 +501,8 @@ private fun SuggestionRow(
             modifier = Modifier.size(22.dp),
         )
         Spacer(Modifier.width(16.dp))
-        Text(
-            // The first row is the deliberate action to search the exact text
-            // in the field, not a server-provided completion. Naming it makes
-            // the otherwise duplicated wording read as intentional.
+        SearchResultTitle(
             text = if (isQueryAction) """${stringResource(R.string.search)} "$term"""" else term,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onBackground,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
         if (onFill != null) {
@@ -639,34 +588,25 @@ private fun TypeaheadSongRow(
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(onClick = onClick, onLongClick = onLongPress)
-            .padding(horizontal = PAGE_GUTTER, vertical = 6.dp),
+            .padding(horizontal = PAGE_GUTTER, vertical = SearchResultRowPaddingV),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         AsyncImage(
             model = song.artworkAt(ROW_ART_PX),
             contentDescription = null,
             modifier = Modifier
-                .size(52.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .thumbnailBorder(RoundedCornerShape(8.dp))
+                .size(SearchResultArtSize)
+                .clip(searchSquareArtShape())
+                .thumbnailBorder(searchSquareArtShape())
                 .background(MaterialTheme.colorScheme.surfaceVariant),
         )
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
-            Text(
-                text = song.title,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onBackground,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            SearchResultTitle(text = song.title)
             Spacer(Modifier.height(2.dp))
-            Text(
-                text = listOfNotNull(song.artist).joinToString(" · "),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+            SearchEntitySubtitle(
+                typeLabel = stringResource(R.string.shelf_song_item),
+                detail = song.searchArtistNames(),
             )
         }
     }
@@ -730,34 +670,33 @@ private fun RecentSearchEntityRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(start = PAGE_GUTTER, end = 8.dp, top = 6.dp, bottom = 6.dp),
+            .padding(
+                start = PAGE_GUTTER,
+                end = 8.dp,
+                top = SearchResultRowPaddingV,
+                bottom = SearchResultRowPaddingV,
+            ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         AsyncImage(
             model = entity.artworkUrl,
             contentDescription = null,
             modifier = Modifier
-                .size(52.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .thumbnailBorder(RoundedCornerShape(8.dp))
+                .size(SearchResultArtSize)
+                .clip(searchSquareArtShape())
+                .thumbnailBorder(searchSquareArtShape())
                 .background(MaterialTheme.colorScheme.surfaceVariant),
         )
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
-            Text(
-                text = entity.title,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onBackground,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            SearchResultTitle(text = entity.title)
             Spacer(Modifier.height(2.dp))
-            Text(
-                text = entity.subtitle.ifBlank { entity.entityType.name.lowercase(Locale.ROOT).replaceFirstChar { it.uppercase(Locale.ROOT) } },
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+            SearchEntitySubtitle(
+                typeLabel = searchEntityTypeLabel(entity.entityType),
+                detail = when (entity.entityType) {
+                    EntityType.TRACK -> entity.subtitle
+                    else -> browseSearchDetail(entity.subtitle, entity.entityType.toBrowseType())
+                },
             )
         }
         Box(
@@ -784,43 +723,171 @@ private fun BrowseRow(item: BrowseItem, onClick: () -> Unit, onLongPress: (() ->
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(onClick = onClick, onLongClick = onLongPress)
-            .padding(horizontal = PAGE_GUTTER, vertical = 8.dp),
+            .padding(horizontal = PAGE_GUTTER, vertical = SearchResultRowPaddingV),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         AsyncImage(
             model = item.thumbnailUrl.artworkAt(ROW_ART_PX),
             contentDescription = null,
             modifier = Modifier
-                .size(52.dp)
+                .size(SearchResultArtSize)
                 .clip(
                     if (item.type == BrowseType.ARTIST) CircleShape
-                    else RoundedCornerShape(8.dp),
+                    else searchSquareArtShape(),
                 )
                 .thumbnailBorder(
                     if (item.type == BrowseType.ARTIST) CircleShape
-                    else RoundedCornerShape(8.dp),
+                    else searchSquareArtShape(),
                 )
                 .background(MaterialTheme.colorScheme.surfaceVariant),
         )
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
-            Text(
-                text = item.title,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onBackground,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = item.subtitle.ifBlank { item.type.name.lowercase(Locale.ROOT).replaceFirstChar { it.uppercase(Locale.ROOT) } },
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+            SearchResultTitle(text = item.title)
+            Spacer(Modifier.height(2.dp))
+            SearchEntitySubtitle(
+                typeLabel = browseSearchTypeLabel(item.type),
+                detail = browseSearchDetail(item.subtitle, item.type),
             )
         }
     }
 }
+
+/** Same bullet home cards and YouTube rows use between kind and credit. */
+private const val SEARCH_ENTITY_BULLET = " • "
+
+/** Plain string for [SongRow] subtitles — same words as [SearchEntitySubtitle]. */
+private fun buildSearchSubtitle(typeLabel: String, detail: String): String {
+    val trimmed = detail.trim()
+    return if (trimmed.isEmpty()) typeLabel else typeLabel + SEARCH_ENTITY_BULLET + trimmed
+}
+
+/**
+ * YouTube already prefixes browse subtitles with "Album • …" — drop the kind
+ * so we do not paint "Album • Album • …".
+ */
+private fun browseSearchDetail(subtitle: String, type: BrowseType): String {
+    if (subtitle.isBlank()) return ""
+    return subtitle
+        .split(Regex("""[•·｜|]"""))
+        .map { it.trim() }
+        .map { segment ->
+            if (type == BrowseType.ALBUM) stripAlbumYearFromSegment(segment) else segment
+        }
+        .filter { segment ->
+            segment.isNotEmpty() && !shouldHideBrowseSubtitleSegment(segment, type)
+        }
+        .joinToString(", ")
+}
+
+private fun stripAlbumYearFromSegment(segment: String): String {
+    if (ALBUM_YEAR_SEGMENT.matches(segment.trim())) return ""
+    return segment
+        .replace(Regex("""\s*[•·]\s*\d{4}\s*$"""), "")
+        .replace(Regex("""\s+\d{4}\s*$"""), "")
+        .trim()
+}
+
+private fun shouldHideBrowseSubtitleSegment(segment: String, type: BrowseType): Boolean {
+    val lower = segment.lowercase(Locale.ROOT)
+    if (lower in SEARCH_KIND_WORDS) return true
+    return when (type) {
+        BrowseType.ARTIST -> isArtistMetricsSegment(lower)
+        BrowseType.PLAYLIST -> isPlaylistMetricsSegment(lower)
+        BrowseType.ALBUM -> ALBUM_YEAR_SEGMENT.matches(segment.trim())
+        else -> false
+    }
+}
+
+private fun isArtistMetricsSegment(lower: String): Boolean {
+    if (ARTIST_STAT_SEGMENT.matches(lower)) return true
+    if (ARTIST_METRIC_PHRASES.any { lower.contains(it) }) return true
+    return ARTIST_LOOSE_COUNT.matches(lower.trim())
+}
+
+private val ARTIST_LOOSE_COUNT = Regex("""^[\d.,]+\s*[KMB]?$""", RegexOption.IGNORE_CASE)
+
+private fun isPlaylistMetricsSegment(lower: String): Boolean {
+    if (PLAYLIST_VIEW_SEGMENT.matches(lower)) return true
+    return PLAYLIST_METRIC_PHRASES.any { lower.contains(it) }
+}
+
+private fun EntityType.toBrowseType(): BrowseType = when (this) {
+    EntityType.ARTIST -> BrowseType.ARTIST
+    EntityType.ALBUM -> BrowseType.ALBUM
+    EntityType.PLAYLIST -> BrowseType.PLAYLIST
+    EntityType.TRACK -> BrowseType.OTHER
+}
+
+private val SEARCH_KIND_WORDS = setOf(
+    "album", "single", "ep", "playlist", "artist", "podcast", "episode", "song", "video",
+)
+
+private val ARTIST_STAT_SEGMENT = Regex(
+    """^[\d.,]+\s*[KMB]?\s*(subscribers?|monthly\s+(audience|listeners?)|listeners?)\b.*$""",
+    RegexOption.IGNORE_CASE,
+)
+
+private val ARTIST_METRIC_PHRASES = listOf(
+    "monthly audience",
+    "monthly listener",
+    "monthly listeners",
+    "subscribers",
+    "subscriber",
+)
+
+private val PLAYLIST_VIEW_SEGMENT = Regex(
+    """^[\d.,]+\s*[KMB]?\s*(views?|plays?)\b.*$""",
+    RegexOption.IGNORE_CASE,
+)
+
+private val PLAYLIST_METRIC_PHRASES = listOf(
+    " views",
+    " view",
+    " plays",
+    " play",
+)
+
+private val ALBUM_YEAR_SEGMENT = Regex("""^\d{4}$""")
+
+@Composable
+private fun SearchEntitySubtitle(
+    typeLabel: String,
+    detail: String,
+    modifier: Modifier = Modifier,
+) {
+    val style = MaterialTheme.typography.bodyMedium
+    val color = MaterialTheme.colorScheme.onSurfaceVariant
+    Text(
+        text = buildSearchSubtitle(typeLabel, detail),
+        style = style,
+        color = color,
+        modifier = modifier,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+private fun Song.searchArtistNames(): String {
+    val fromCredits = artists.map { it.name }.filter { it.isNotBlank() }.distinct().joinToString(", ")
+    return fromCredits.ifBlank { artist.trim() }
+}
+
+@Composable
+private fun browseSearchTypeLabel(type: BrowseType): String = when (type) {
+    BrowseType.ALBUM -> stringResource(R.string.album)
+    BrowseType.ARTIST -> stringResource(R.string.artist)
+    BrowseType.PLAYLIST -> stringResource(R.string.playlist)
+    BrowseType.OTHER -> type.name.lowercase(Locale.ROOT).replaceFirstChar { it.titlecase(Locale.ROOT) }
+}.replaceFirstChar { it.titlecase(Locale.ROOT) }
+
+@Composable
+private fun searchEntityTypeLabel(type: EntityType): String = when (type) {
+    EntityType.TRACK -> stringResource(R.string.shelf_song_item)
+    EntityType.ALBUM -> stringResource(R.string.album)
+    EntityType.ARTIST -> stringResource(R.string.artist)
+    EntityType.PLAYLIST -> stringResource(R.string.playlist)
+}.replaceFirstChar { it.titlecase(Locale.ROOT) }
 
 /**
  * Filter pills rather than a tab row: squarish rounded rectangles, the selected
@@ -828,45 +895,48 @@ private fun BrowseRow(item: BrowseItem, onClick: () -> Unit, onLongPress: (() ->
  * text, and the gutter padding sits inside the scroll so it scrolls with them.
  */
 @Composable
-private fun SearchFilterTabs(filter: SearchFilter, onFilterChange: (SearchFilter) -> Unit) {
+private fun SearchFilterTabs(
+    filter: SearchFilter,
+    onFilterChange: (SearchFilter) -> Unit,
+    hazeState: HazeState?,
+    modifier: Modifier = Modifier,
+) {
     val haptics = rememberHaptics()
+    val chipShape = remember { RoundedCornerShape(percent = 50) }
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
+        modifier = modifier
             .horizontalScroll(rememberScrollState())
             .padding(horizontal = PAGE_GUTTER, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        SearchFilter.entries.forEach { entry ->
+        SEARCH_FILTER_CHIP_ORDER.forEach { entry ->
             val selected = entry == filter
+            val scheme = MaterialTheme.colorScheme
+            val fillModifier = when {
+                selected -> Modifier.background(scheme.onBackground, chipShape)
+                hazeState != null -> Modifier.frostedSurface(shape = chipShape, hazeState = hazeState)
+                else -> Modifier.background(scheme.surfaceVariant, chipShape)
+            }
             Box(
                 modifier = Modifier
-                    .clip(FILTER_PILL_SHAPE)
-                    .background(
-                        if (selected) MaterialTheme.colorScheme.onBackground
-                        else MaterialTheme.colorScheme.surfaceVariant,
-                    )
-                    // Only the pill that isn't already selected has anything to
-                    // report — re-tapping the current filter changes nothing, so
-                    // buzzing for it would be feedback for a no-op.
+                    .then(fillModifier)
                     .clickable {
                         if (!selected) haptics.play(Haptic.Select)
                         onFilterChange(entry)
                     }
                     .padding(horizontal = 12.dp, vertical = 6.dp),
+                contentAlignment = Alignment.Center,
             ) {
                 Text(
                     text = entry.label,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = if (selected) MaterialTheme.colorScheme.background
-                    else MaterialTheme.colorScheme.onBackground,
+                    style = MaterialTheme.typography.labelLarge.copy(
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    ),
+                    color = if (selected) scheme.background else scheme.onBackground,
                     maxLines = 1,
                 )
             }
         }
     }
 }
-
-/** Rounded, but well short of a capsule — the corner reads as a cut, not a curve. */
-private val FILTER_PILL_SHAPE = RoundedCornerShape(12.dp)

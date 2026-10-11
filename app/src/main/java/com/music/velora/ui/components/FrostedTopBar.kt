@@ -259,6 +259,11 @@ fun FrostedTopBar(
     // A lambda, not a value: the drag changes every frame, and reading it in
     // the caller would recompose the whole app on each one.
     pullFraction: () -> Float = { 0f },
+    /**
+     * Fills the bar row on root tabs (e.g. search field) to the left of
+     * [actions]. Only used when [onBack] is null and floating chrome is on.
+     */
+    leadingBarContent: (@Composable () -> Unit)? = null,
     actions: @Composable () -> Unit = {},
 ) {
     val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
@@ -297,6 +302,26 @@ fun FrostedTopBar(
                 .padding(top = stableStatusBarTopPadding())
                 .height(TopBarContentHeight),
         ) {
+            if (leadingBarContent != null && useFloatingChrome && onBack == null) {
+                Row(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .padding(horizontal = PAGE_GUTTER),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 8.dp),
+                    ) {
+                        leadingBarContent()
+                    }
+                    ArtworkPageActions(
+                        hazeState = backButtonHazeState,
+                        content = actions,
+                    )
+                }
+            } else {
             // On a pushed page the back affordance is always visible, since
             // there is no large in-list header to fall back on.
             if (onBack != null) {
@@ -405,6 +430,7 @@ fun FrostedTopBar(
                 ) {
                     actions()
                 }
+            }
             }
         }
         HorizontalDivider(thickness = 0.5.dp, color = dividerColor)

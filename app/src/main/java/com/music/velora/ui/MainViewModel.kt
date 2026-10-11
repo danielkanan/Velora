@@ -38,6 +38,7 @@ import com.music.velora.data.model.PlaylistPrivacy
 import com.music.velora.data.model.SPOTIFY_MISSING_PREFIX
 import com.music.velora.data.model.SPOTIFY_PENDING_PREFIX
 import com.music.velora.data.model.SearchFilter
+import com.music.velora.data.search.SearchRanker
 import com.music.velora.data.model.SearchResult
 import com.music.velora.data.model.ShelfItem
 import com.music.velora.data.model.Song
@@ -241,6 +242,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private data class SearchSession(
         val key: String,
         val requestId: Long,
+        val query: String,
         val filter: SearchFilter,
         val continuation: String?,
     )
@@ -2112,7 +2114,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val requestId: Long,
     )
 
-    private fun cacheKey(query: String, filter: SearchFilter) = "${filter.name}:$query"
+    /** Bumped when search ranking/enrichment changes so stale LRU rows are ignored. */
+    private fun cacheKey(query: String, filter: SearchFilter) = "sr5:${filter.name}:$query"
 
     /**
      * The results of the longest earlier query this one starts with — near
@@ -2175,7 +2178,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val cached = exact?.rows ?: prefixMatch(request.query, request.filter)
                 _results.value = cached?.let { UiState.Success(it) } ?: UiState.Loading
                 if (exact != null) {
-                    searchSession = SearchSession(key, request.requestId, request.filter, exact.continuation)
+                    searchSession = SearchSession(
+                        key,
+                        request.requestId,
+                        request.query,
+                        request.filter,
+                        exact.continuation,
+                    )
                     return@collectLatest
                 }
 
@@ -2192,9 +2201,34 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // A search that has been superseded shouldn't land on screen,
                 // whether it succeeded or failed.
                 if (request.requestId != newestRequestId.get()) return@collectLatest
-                _results.value = result.fold(
-                    onSuccess = { page -> published(page, key, request.requestId) },
-                    onFailure = { failure -> UiState.Error(failure.friendly()) },
+                result.fold(
+                    onSuccess = { page ->
+                        _results.value = published(page, key, request.requestId)
+                        if (
+                            (request.filter == SearchFilter.ALL || request.filter == SearchFilter.SONGS) &&
+                            SearchRanker.needsBackgroundEnrichment(
+                                request.query,
+                                request.filter,
+                                page.rows,
+                            )
+                        ) {
+                            val reqId = request.requestId
+                            viewModelScope.launch {
+                                val enriched = YtMusicRepository.enrichSearchPage(
+                                    request.query,
+                                    request.filter,
+                                    page,
+                                )
+                                if (reqId != newestRequestId.get()) return@launch
+                                enriched.onSuccess { full ->
+                                    if (searchSession?.key != key) return@onSuccess
+                                    searchCache.put(key, SearchCacheEntry(full.rows, full.continuation))
+                                    _results.value = UiState.Success(full.rows)
+                                }
+                            }
+                        }
+                    },
+                    onFailure = { failure -> _results.value = UiState.Error(failure.friendly()) },
                 )
             }
     }
@@ -2215,7 +2249,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             if (stillCurrent) {
                 next.onSuccess { page ->
                     val current = (_results.value as? UiState.Success)?.data.orEmpty()
-                    val merged = (current + page.rows).distinctBy(::searchResultKey)
+                    val ranked = SearchRanker.rank(
+                        session.query,
+                        session.filter,
+                        (current + page.rows).distinctBy(::searchResultKey),
+                    )
+                    val merged = if (session.filter == SearchFilter.ALL) {
+                        SearchRanker.composeAllTab(session.query, ranked)
+                    } else {
+                        ranked
+                    }
                     searchCache.put(session.key, SearchCacheEntry(merged, page.continuation))
                     searchSession = session.copy(continuation = page.continuation)
                     _results.value = UiState.Success(merged)
@@ -2307,7 +2350,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val rows = page.rows
         if (rows.isEmpty()) return UiState.Error(text(R.string.no_results))
         searchCache.put(key, SearchCacheEntry(rows, page.continuation))
-        searchSession = SearchSession(key, requestId, _filter.value, page.continuation)
+        searchSession = SearchSession(key, requestId, _query.value, _filter.value, page.continuation)
         prefetchTopResult(rows)
         return UiState.Success(rows)
     }
